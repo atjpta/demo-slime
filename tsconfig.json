@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "jsx": "preserve",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "skipLibCheck": true,
+    "paths": {
+      "*": ["./*"],
+      "@/*": ["./src/*"]
+    },
+    "plugins": [{ "name": "@vue/typescript-plugin" }]
+  },
+  "include": ["src/**/*"]
+}
