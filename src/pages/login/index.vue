@@ -1,22 +1,25 @@
 <script setup lang="ts">
   import { ref } from "vue";
+  import { useRouter } from "vue-router";
   import { toast } from "vue-sonner";
-  import { useBattleStore } from "@/store";
-  import { http } from "@/api";
+  import { useAuthStore } from "@/stores";
+  import { authService } from "@/client";
 
-  const store = useBattleStore();
+  const router = useRouter();
+  const authStore = useAuthStore();
   const form = ref({ email: "", password: "" });
 
   const login = async () => {
-    store.loading = true;
+    authStore.loading = true;
     try {
-      const data = await http("POST", "/auth/login", form.value);
-      store.userToken = data.token;
-      store.step = "players";
+      const data = await authService.login(form.value.email, form.value.password);
+      authStore.userToken = data.token;
+      authService.setToken(data.token);
+      router.push("/players");
     } catch (e: any) {
       toast.error(e.message);
     } finally {
-      store.loading = false;
+      authStore.loading = false;
     }
   };
 </script>
@@ -40,7 +43,7 @@
           class="input input-bordered w-full"
           @keyup.enter="login"
         />
-        <button class="btn btn-primary w-full" :class="{ loading: store.loading }" @click="login">
+        <button class="btn btn-primary w-full" :class="{ loading: authStore.loading }" @click="login">
           Đăng nhập
         </button>
       </div>

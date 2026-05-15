@@ -3,7 +3,7 @@
   import { TURNS_PER_WAVE, SKILL_META } from "@/constants";
 
   const props = defineProps<{
-    skills: any[];
+    skills: { code: string; type: string }[];
     modelValue: number[];
     submitted: boolean;
   }>();
@@ -13,12 +13,10 @@
     (e: "submit"): void;
   }>();
 
-  // null = empty slot
   const slots = ref<(number | null)[]>(Array(TURNS_PER_WAVE).fill(null));
 
   const canSubmit = computed(() => slots.value.every((s) => s !== null));
 
-  // Reset slots when wave resets (submitted goes true → false)
   watch(
     () => props.submitted,
     (val) => {
@@ -26,10 +24,6 @@
     }
   );
 
-  const getSkill = (orderIndex: number | null) =>
-    orderIndex !== null ? props.skills.find((s) => s.orderIndex === orderIndex) : null;
-
-  // Click skill in palette → add to next empty slot
   const addSkill = (orderIndex: number) => {
     const emptyIdx = slots.value.indexOf(null);
     if (emptyIdx === -1) return;
@@ -39,14 +33,12 @@
     emit("update:modelValue", next.map((s) => s ?? 0));
   };
 
-  // Click slot → remove
   const removeSlot = (slotIdx: number) => {
     const next = [...slots.value];
     next[slotIdx] = null;
     slots.value = next;
   };
 
-  // Drag & drop between slots
   const dragFromIdx = ref<number | null>(null);
   const dragOverIdx = ref<number | null>(null);
 
@@ -87,74 +79,73 @@
 </script>
 
 <template>
-  <div v-if="!submitted" class="card bg-base-100 shadow-md">
-    <div class="card-body p-4 gap-4">
-      <h3 class="font-bold text-base">Chọn hành động ({{ TURNS_PER_WAVE }} lượt)</h3>
-
-      <!-- Palette: available skills -->
-      <div>
-        <p class="text-xs opacity-50 mb-2">Kỹ năng</p>
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="s in skills"
-            :key="s.orderIndex"
-            class="btn btn-sm"
-            :class="SKILL_META[s.skill.type]?.color"
-            :disabled="slots.indexOf(null) === -1"
-            @click="addSkill(s.orderIndex)"
-          >
-            {{ SKILL_META[s.skill.type]?.icon }}
-            {{ s.skill.name ?? SKILL_META[s.skill.type]?.label }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Queue: selected slots -->
-      <div>
-        <p class="text-xs opacity-50 mb-2">Hàng chờ (kéo thả để đổi thứ tự, click để xóa)</p>
-        <div class="flex gap-2">
-          <div
-            v-for="(slot, i) in slots"
-            :key="i"
-            class="flex-1 min-w-0 h-16 rounded-lg border-2 border-dashed flex items-center justify-center transition-colors"
-            :class="
-              dragOverIdx === i && dragFromIdx !== i
-                ? 'border-primary bg-primary/10'
-                : slot !== null
-                  ? 'border-transparent'
-                  : 'border-base-300'
-            "
-            @dragover="onDragOver(i, $event)"
-            @drop="onDrop(i)"
-          >
-            <!-- Filled slot -->
-            <div
-              v-if="slot !== null"
-              class="w-full h-full rounded-lg flex flex-col items-center justify-center gap-1 cursor-grab active:cursor-grabbing select-none relative"
-              :class="SKILL_META[getSkill(slot)?.skill.type]?.color + ' text-white'"
-              draggable="true"
-              @dragstart="onDragStart(i, $event)"
-              @dragend="onDragEnd"
-              @click="removeSlot(i)"
-            >
-              <span class="text-lg leading-none">{{ SKILL_META[getSkill(slot)?.skill.type]?.icon }}</span>
-              <span class="text-xs font-semibold leading-none">
-                {{ getSkill(slot)?.skill.name ?? SKILL_META[getSkill(slot)?.skill.type]?.label }}
-              </span>
-              <span class="absolute top-1 right-1 text-[10px] opacity-60">{{ i + 1 }}</span>
-            </div>
-
-            <!-- Empty slot -->
-            <span v-else class="text-xs opacity-30">{{ i + 1 }}</span>
-          </div>
-        </div>
-      </div>
-
-      <button class="btn btn-primary mt-1" :disabled="!canSubmit" @click="handleSubmit">
-        ✅ Xác nhận hành động
-      </button>
-    </div>
+  <!-- Submitted state -->
+  <div v-if="submitted" class="flex items-center justify-center gap-2 py-3 opacity-60">
+    <span class="loading loading-dots loading-sm"></span>
+    <span class="text-sm">Đã gửi, chờ đối thủ...</span>
   </div>
 
-  <div v-else class="alert alert-success shadow">✅ Đã gửi hành động, chờ đối thủ...</div>
+  <div v-else class="flex flex-col gap-3">
+    <!-- Skill palette -->
+    <div class="flex gap-2 justify-center">
+      <button
+        v-for="(s, i) in skills"
+        :key="i"
+        class="btn btn-sm rounded-none flex-1 gap-1.5"
+        :class="SKILL_META[s.code]?.color"
+        :disabled="slots.indexOf(null) === -1"
+        @click="addSkill(i)"
+      >
+        <span>{{ SKILL_META[s.code]?.icon }}</span>
+        <span class="hidden sm:inline">{{ SKILL_META[s.code]?.label }}</span>
+      </button>
+    </div>
+
+    <!-- Slot queue -->
+    <div class="flex gap-1.5">
+      <div
+        v-for="(slot, i) in slots"
+        :key="i"
+        class="flex-1 h-14 border-2 border-dashed flex items-center justify-center transition-all duration-150"
+        :class="
+          dragOverIdx === i && dragFromIdx !== i
+            ? 'border-primary bg-primary/10 scale-105'
+            : slot !== null
+              ? 'border-transparent'
+              : 'border-base-300 opacity-50'
+        "
+        @dragover="onDragOver(i, $event)"
+        @drop="onDrop(i)"
+      >
+        <!-- Filled -->
+        <div
+          v-if="slot !== null"
+          class="w-full h-full flex flex-col items-center justify-center gap-0.5 cursor-grab active:cursor-grabbing select-none relative"
+          :class="SKILL_META[skills[slot]?.code]?.color + ' text-white'"
+          draggable="true"
+          @dragstart="onDragStart(i, $event)"
+          @dragend="onDragEnd"
+          @click="removeSlot(i)"
+        >
+          <span class="text-base leading-none">{{ SKILL_META[skills[slot]?.code]?.icon }}</span>
+          <span class="text-[10px] font-bold leading-none opacity-90">
+            {{ SKILL_META[skills[slot]?.code]?.label }}
+          </span>
+          <span class="absolute top-0.5 right-1 text-[9px] opacity-50">{{ i + 1 }}</span>
+        </div>
+
+        <!-- Empty -->
+        <span v-else class="text-sm font-bold opacity-20">{{ i + 1 }}</span>
+      </div>
+    </div>
+
+    <!-- Submit -->
+    <button
+      class="btn btn-primary btn-sm rounded-none w-full"
+      :disabled="!canSubmit"
+      @click="handleSubmit"
+    >
+      Xác nhận
+    </button>
+  </div>
 </template>

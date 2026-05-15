@@ -1,35 +1,71 @@
 <script setup lang="ts">
-  defineProps<{
+  import { computed } from "vue";
+
+  const props = defineProps<{
     label: string;
     name?: string;
     stats?: { hp: number; attack: number; magic: number; defense: number } | null;
+    initHp?: number | null;
     variant: "primary" | "error";
+    ready?: boolean;
   }>();
+
+  const maxHp = computed(() => props.initHp ?? props.stats?.hp ?? null);
+
+  const hpPercent = computed(() => {
+    if (maxHp.value == null || props.stats == null) return 100;
+    return Math.max(0, Math.min(100, (props.stats.hp / maxHp.value) * 100));
+  });
+
+  const hpBarClass = computed(() => {
+    const pct = hpPercent.value;
+    if (pct > 55) return "bg-success";
+    if (pct > 25) return "bg-warning";
+    return "bg-error animate-pulse";
+  });
 </script>
 
 <template>
-  <div class="card bg-base-100 shadow-md" :class="`border-2 border-${variant}`">
-    <div class="card-body p-4 gap-2">
+  <div
+    class="rounded-none bg-base-100 shadow-lg overflow-hidden"
+    :class="variant === 'primary' ? 'ring-2 ring-primary/50' : 'ring-2 ring-error/50'"
+  >
+    <!-- Header -->
+    <div
+      class="flex items-center justify-between px-3 py-2"
+      :class="variant === 'primary' ? 'bg-primary/10' : 'bg-error/10'"
+    >
+      <span class="font-bold text-sm truncate leading-tight">{{ name ?? "..." }}</span>
+      <span v-if="ready" class="badge badge-xs badge-success shrink-0">Đã sẵn sàng</span>
+    </div>
+
+    <div class="px-3 pt-2.5 pb-3 flex flex-col gap-2.5">
+      <!-- HP bar with number overlaid -->
       <div class="flex items-center gap-2">
-        <span class="badge" :class="`badge-${variant}`">{{ label }}</span>
-        <span v-if="name" class="font-bold">{{ name }}</span>
-      </div>
-      <div v-if="stats" class="flex flex-col gap-1 text-sm">
-        <div class="flex justify-between">
-          <span>❤️ HP</span>
-          <span class="font-mono font-bold">{{ stats.hp }}</span>
-        </div>
-        <div class="flex justify-between opacity-70">
-          <span>⚔️ ATK</span><span class="font-mono">{{ stats.attack }}</span>
-        </div>
-        <div class="flex justify-between opacity-70">
-          <span>✨ MAG</span><span class="font-mono">{{ stats.magic }}</span>
-        </div>
-        <div class="flex justify-between opacity-70">
-          <span>🛡️ DEF</span><span class="font-mono">{{ stats.defense }}</span>
+        <span class="text-xs shrink-0 leading-none">❤️</span>
+        <div class="relative flex-1 h-6">
+          <div class="absolute inset-0 bg-base-300 overflow-hidden">
+            <div
+              class="h-full transition-all duration-700 ease-out"
+              :class="hpBarClass"
+              :style="{ width: `${hpPercent}%` }"
+            />
+          </div>
+          <div class="absolute inset-0 flex items-center justify-center text-white">
+            <span class="font-mono font-extrabold text-sm leading-none">
+              {{ stats?.hp ?? "?" }}<span class="font-normal text-xs"> / {{ maxHp ?? "?" }}</span>
+            </span>
+          </div>
         </div>
       </div>
-      <div v-else class="text-sm opacity-40">Chờ...</div>
+
+      <!-- Stats row (icons only, left-aligned) -->
+      <div v-if="stats" class="flex items-center gap-3 tabular-nums">
+        <span class="text-xs font-mono font-semibold">⚔️ {{ stats.attack }}</span>
+        <span class="text-xs font-mono font-semibold">✨ {{ stats.magic }}</span>
+        <span class="text-xs font-mono font-semibold">🛡️ {{ stats.defense }}</span>
+      </div>
+      <div v-else class="text-xs opacity-30 py-0.5">Chờ...</div>
     </div>
   </div>
 </template>

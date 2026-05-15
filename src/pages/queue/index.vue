@@ -1,12 +1,14 @@
 <script setup lang="ts">
-  import { useBattleStore } from "@/store";
+  import { useRouter } from "vue-router";
+  import { useBattleStore } from "@/stores";
 
-  const store = useBattleStore();
+  const router = useRouter();
+  const battleStore = useBattleStore();
 
   const cancel = () => {
-    store.rooms.queue?.leave();
-    store.rooms.queue = null;
-    store.step = "players";
+    battleStore.rooms.queue?.leave();
+    battleStore.rooms.queue = null;
+    router.push("/lobby");
   };
 </script>
 
