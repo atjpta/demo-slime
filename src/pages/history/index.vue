@@ -25,13 +25,6 @@
     draw: "Hòa",
   };
 
-  const getResult = (item: BattleLogItem) => {
-    if (!item.winner) return { label: "Hòa", class: "badge-warning" };
-    if (item.winner._id === playerStore.myPlayerId)
-      return { label: "Thắng", class: "badge-success" };
-    return { label: "Thua", class: "badge-error" };
-  };
-
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" });
 
@@ -68,7 +61,9 @@
 
 <template>
   <div class="container mx-auto max-w-2xl p-4 flex flex-col gap-4">
-    <button class="btn btn-ghost btn-sm self-start" @click="router.push('/lobby')">← Quay lại</button>
+    <button class="btn btn-ghost btn-sm self-start" @click="router.push('/lobby')">
+      ← Quay lại
+    </button>
 
     <div class="flex items-center justify-between">
       <h1 class="text-xl font-bold">Lịch sử trận đấu</h1>
@@ -97,20 +92,27 @@
         <div class="card-body py-3 px-4 flex-row items-center gap-3">
           <!-- Players -->
           <div class="flex-1 min-w-0">
-            <div class="font-semibold text-sm truncate">
-              {{ item.players[0]?.player.name ?? "?" }}
-              <span class="opacity-40 mx-1">vs</span>
-              {{ item.players[1]?.player.name ?? "?" }}
+            <div class="font-semibold text-sm flex items-center gap-1.5 flex-wrap">
+              <span
+                :class="item.winner === item.players[0]?.player._id ? 'text-warning' : 'opacity-60'"
+              >
+                <span v-if="item.winner === item.players[0]?.player._id">🏆 </span
+                >{{ item.players[0]?.player.name ?? "?" }}
+              </span>
+              <span class="opacity-30 text-xs">vs</span>
+              <span
+                :class="item.winner === item.players[1]?.player._id ? 'text-warning' : 'opacity-60'"
+              >
+                <span v-if="item.winner === item.players[1]?.player._id">🏆 </span
+                >{{ item.players[1]?.player.name ?? "?" }}
+              </span>
+              <span v-if="!item.winner" class="text-xs opacity-40 italic">hòa</span>
             </div>
             <div class="text-xs opacity-40 mt-0.5">
-              {{ endReasonLabel[item.endReason] ?? item.endReason }} · {{ formatDate(item.createdAt) }}
+              {{ endReasonLabel[item.endReason] ?? item.endReason }} ·
+              {{ formatDate(item.createdAt) }}
             </div>
           </div>
-
-          <!-- Result badge -->
-          <span class="badge badge-sm shrink-0" :class="getResult(item).class">
-            {{ getResult(item).label }}
-          </span>
 
           <!-- Replay link -->
           <span class="text-xs opacity-50">▶</span>
