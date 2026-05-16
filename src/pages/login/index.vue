@@ -46,6 +46,10 @@
         <button class="btn btn-primary w-full" :class="{ loading: authStore.loading }" @click="login">
           Đăng nhập
         </button>
+        <p class="text-center text-sm">
+          Chưa có tài khoản?
+          <router-link to="/register" class="link link-primary">Đăng ký</router-link>
+        </p>
       </div>
     </div>
   </div>

@@ -98,6 +98,16 @@ export class BattleRoom extends BaseClient {
     room.onError((code, msg) => handlers.onError(code, msg ?? ""));
   }
 
+  async create(playerToken: string): Promise<Room> {
+    this.setToken(playerToken);
+    return colyseus.create("battle");
+  }
+
+  async joinById(roomId: string, playerToken: string): Promise<Room> {
+    this.setToken(playerToken);
+    return colyseus.joinById(roomId);
+  }
+
   async reconnect(token: string): Promise<Room> {
     return colyseus.reconnect(token);
   }
