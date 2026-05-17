@@ -135,10 +135,10 @@
       </button>
       <button
         class="btn btn-outline w-full"
-        :class="{ loading: createLoading }"
         :disabled="createLoading"
         @click="createMatch"
       >
+        <span v-if="createLoading" class="loading loading-spinner loading-sm"></span>
         🏟️ Tạo trận
       </button>
       <button class="btn btn-outline w-full" @click="showJoinModal = true">
@@ -186,10 +186,10 @@
           <button class="btn btn-ghost flex-1" @click="showJoinModal = false; joinCode = ''">Hủy</button>
           <button
             class="btn btn-primary flex-1"
-            :class="{ loading: joinLoading }"
             :disabled="joinLoading || !joinCode.trim()"
             @click="joinByCode"
           >
+            <span v-if="joinLoading" class="loading loading-spinner loading-sm"></span>
             Vào phòng
           </button>
         </div>

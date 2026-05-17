@@ -11,6 +11,7 @@
   import ExecutingPanel from "./components/ExecutingPanel.vue";
   import TurnLogList from "./components/TurnLogList.vue";
   import BattleResultModal from "./components/BattleResultModal.vue";
+  import BattleGuideModal from "./components/BattleGuideModal.vue";
 
   const router = useRouter();
   const playerStore = usePlayerStore();
@@ -19,6 +20,7 @@
   const selectedActions = ref<number[]>(Array(TURNS_PER_WAVE).fill(0));
   const actionsSubmitted = ref(false);
   const result = ref<"win" | "lose" | "draw" | null>(null);
+  const showGuide = ref(false);
 
   const mySkills = computed(() => battleStore.initPlayers[playerStore.myPlayerId]?.skills ?? []);
 
@@ -294,7 +296,14 @@
 
     <div v-if="battleStore.phase === Phase.SELECTING" class="flex flex-col gap-3">
       <div class="grid grid-cols-3 items-center">
-        <span class="text-sm font-semibold opacity-60">Chọn hành động</span>
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold opacity-60">Chọn hành động</span>
+          <button
+            class="btn btn-xs btn-circle btn-info animate-pulse shadow-md shadow-info/50 font-bold text-info-content"
+            title="Hướng dẫn chiến đấu"
+            @click="showGuide = true"
+          >?</button>
+        </div>
         <span class="text-sm font-bold text-center opacity-50">Wave {{ battleStore.wave }}</span>
         <div class="flex items-baseline gap-1 justify-end">
           <span
@@ -323,4 +332,5 @@
   </div>
 
   <BattleResultModal v-if="result" :result="result" @confirm="confirmResult" />
+  <BattleGuideModal v-if="showGuide" @close="showGuide = false" />
 </template>

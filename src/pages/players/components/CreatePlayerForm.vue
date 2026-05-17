@@ -22,6 +22,9 @@
       class="input input-bordered flex-1"
       @keyup.enter="submit"
     />
-    <button class="btn btn-secondary" :class="{ loading }" @click="submit">Tạo</button>
+    <button class="btn btn-secondary" :disabled="loading" @click="submit">
+      <span v-if="loading" class="loading loading-spinner loading-sm"></span>
+      Tạo
+    </button>
   </div>
 </template>

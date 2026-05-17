@@ -62,7 +62,9 @@ export class BattleRoom extends BaseClient {
 
     callbacks.onAdd("players", (player: any, pid: string) => {
       handlers.onPlayersChange([...state.players.keys()]);
-      callbacks.listen(player, "ready", (ready: boolean) => handlers.onPlayerReadyChange(pid, ready));
+      callbacks.listen(player, "ready", (ready: boolean) =>
+        handlers.onPlayerReadyChange(pid, ready)
+      );
       callbacks.onAdd(player, "actions", () => {
         if (player.actions.length === TURNS_PER_WAVE) {
           handlers.onActionsChange(pid, [...player.actions]);

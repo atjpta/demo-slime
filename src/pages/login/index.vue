@@ -43,7 +43,8 @@
           class="input input-bordered w-full"
           @keyup.enter="login"
         />
-        <button class="btn btn-primary w-full" :class="{ loading: authStore.loading }" @click="login">
+        <button class="btn btn-primary w-full" :disabled="authStore.loading" @click="login">
+          <span v-if="authStore.loading" class="loading loading-spinner loading-sm"></span>
           Đăng nhập
         </button>
         <p class="text-center text-sm">

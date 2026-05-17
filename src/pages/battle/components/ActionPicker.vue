@@ -1,5 +1,6 @@
 <script setup lang="ts">
   import { ref, computed, watch } from "vue";
+  import { VueDraggable } from "vue-draggable-plus";
   import { TURNS_PER_WAVE, SKILL_META } from "@/constants";
 
   const props = defineProps<{
@@ -39,36 +40,8 @@
     slots.value = next;
   };
 
-  const dragFromIdx = ref<number | null>(null);
-  const dragOverIdx = ref<number | null>(null);
-
-  const onDragStart = (idx: number, e: DragEvent) => {
-    dragFromIdx.value = idx;
-    e.dataTransfer!.effectAllowed = "move";
-  };
-
-  const onDragOver = (idx: number, e: DragEvent) => {
-    e.preventDefault();
-    dragOverIdx.value = idx;
-  };
-
-  const onDrop = (toIdx: number) => {
-    if (dragFromIdx.value === null || dragFromIdx.value === toIdx) {
-      dragFromIdx.value = null;
-      dragOverIdx.value = null;
-      return;
-    }
-    const next = [...slots.value];
-    [next[dragFromIdx.value], next[toIdx]] = [next[toIdx], next[dragFromIdx.value]];
-    slots.value = next;
-    dragFromIdx.value = null;
-    dragOverIdx.value = null;
-    emit("update:modelValue", next.map((s) => s ?? 0));
-  };
-
-  const onDragEnd = () => {
-    dragFromIdx.value = null;
-    dragOverIdx.value = null;
+  const onSortEnd = () => {
+    emit("update:modelValue", slots.value.map((s) => s ?? 0));
   };
 
   const handleSubmit = () => {
@@ -102,29 +75,27 @@
     </div>
 
     <!-- Slot queue -->
-    <div class="flex gap-1.5">
+    <VueDraggable
+      v-model="slots"
+      class="flex gap-1.5"
+      :animation="180"
+      filter=".slot-empty"
+      :prevent-on-filter="false"
+      @end="onSortEnd"
+    >
       <div
         v-for="(slot, i) in slots"
         :key="i"
-        class="flex-1 h-14 border-2 border-dashed flex items-center justify-center transition-all duration-150"
+        class="flex-1 h-14 border-2 border-dashed flex items-center justify-center transition-colors duration-150"
         :class="
-          dragOverIdx === i && dragFromIdx !== i
-            ? 'border-primary bg-primary/10 scale-105'
-            : slot !== null
-              ? 'border-transparent'
-              : 'border-base-300 opacity-50'
+          slot !== null ? 'border-transparent' : 'border-base-300 opacity-50 slot-empty'
         "
-        @dragover="onDragOver(i, $event)"
-        @drop="onDrop(i)"
       >
         <!-- Filled -->
         <div
           v-if="slot !== null"
           class="w-full h-full flex flex-col items-center justify-center gap-0.5 cursor-grab active:cursor-grabbing select-none relative"
           :class="SKILL_META[skills[slot]?.code]?.color + ' text-white'"
-          draggable="true"
-          @dragstart="onDragStart(i, $event)"
-          @dragend="onDragEnd"
           @click="removeSlot(i)"
         >
           <span class="text-base leading-none">{{ SKILL_META[skills[slot]?.code]?.icon }}</span>
@@ -137,7 +108,7 @@
         <!-- Empty -->
         <span v-else class="text-sm font-bold opacity-20">{{ i + 1 }}</span>
       </div>
-    </div>
+    </VueDraggable>
 
     <!-- Submit -->
     <button

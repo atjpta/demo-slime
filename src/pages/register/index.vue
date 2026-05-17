@@ -57,9 +57,10 @@
         />
         <button
           class="btn btn-primary w-full"
-          :class="{ loading: authStore.loading }"
+          :disabled="authStore.loading"
           @click="register"
         >
+          <span v-if="authStore.loading" class="loading loading-spinner loading-sm"></span>
           Đăng ký
         </button>
         <p class="text-center text-sm">
