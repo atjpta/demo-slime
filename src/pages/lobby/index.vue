@@ -3,7 +3,17 @@
   import { useRouter } from "vue-router";
   import { toast } from "vue-sonner";
   import { useAuthStore, usePlayerStore, useBattleStore } from "@/stores";
-  import { playerService, queueRoom, battleRoom } from "@/client";
+  import { playerService, rankingService, queueRoom, battleRoom } from "@/client";
+  import TierBadge from "@/components/TierBadge.vue";
+  import RankConfigModal from "./components/RankConfigModal.vue";
+  import LeaderboardModal from "./components/LeaderboardModal.vue";
+  import BattleGuideModal from "@/pages/battle/components/BattleGuideModal.vue";
+  import type { TierCode } from "@/constants";
+
+  const showRankConfig = ref(false);
+  const showLeaderboard = ref(false);
+  const showGuide = ref(false);
+  const rankLoading = ref(false);
 
   const router = useRouter();
   const authStore = useAuthStore();
@@ -68,32 +78,45 @@
 
   // ─── Quick match ─────────────────────────────────────────────────────────────
   const restorePlayer = async () => {
-    if (playerStore.myPlayer || !playerStore.playerToken) return;
+    if (!playerStore.playerToken) return;
+    rankLoading.value = true;
     try {
       playerService.setToken(playerStore.playerToken);
-      playerStore.myPlayer = await playerService.me();
-      playerStore.myPlayerId = playerStore.myPlayer._id;
+      rankingService.setToken(playerStore.playerToken);
+      const [player, rankProfile] = await Promise.all([
+        playerService.me(),
+        rankingService.getMyRankProfile("normal"),
+      ]);
+      playerStore.myPlayer = player;
+      playerStore.myPlayerId = player._id;
+      playerStore.myRankProfile = rankProfile;
     } catch {
       playerStore.playerToken = "";
       router.push("/players");
+    } finally {
+      rankLoading.value = false;
     }
   };
 
-  const findQuickMatch = async () => {
+  const joinQueue = async (rankMode?: "normal" | "balance") => {
     authStore.loading = true;
     try {
       router.push("/queue");
-      battleStore.rooms.queue = await queueRoom.join(playerStore.playerToken, {
-        onBattleReady: (room) => {
-          battleStore.rooms.battle = room;
-          router.push("/battle");
+      battleStore.rooms.queue = await queueRoom.join(
+        playerStore.playerToken,
+        {
+          onBattleReady: (room) => {
+            battleStore.rooms.battle = room;
+            router.push("/battle");
+          },
+          onLeave: (code) => console.log("[queue] onLeave code:", code),
+          onError: (_code, msg) => {
+            toast.error(`Queue: ${msg}`);
+            router.push("/lobby");
+          },
         },
-        onLeave: (code) => console.log("[queue] onLeave code:", code),
-        onError: (_code, msg) => {
-          toast.error(`Queue: ${msg}`);
-          router.push("/lobby");
-        },
-      });
+        rankMode,
+      );
     } catch (e: any) {
       toast.error(e.message);
       router.push("/lobby");
@@ -113,7 +136,7 @@
 </script>
 
 <template>
-  <div class="container mx-auto max-w-sm p-6 flex flex-col items-center gap-6 mt-8">
+  <div class="container mx-auto max-w-lg p-6 flex flex-col items-center gap-6 mt-8">
     <!-- Player info -->
     <div class="card bg-base-100 shadow-md w-full">
       <div class="card-body items-center text-center gap-2 py-5">
@@ -124,40 +147,93 @@
       </div>
     </div>
 
-    <!-- Match buttons -->
-    <div class="flex flex-col gap-3 w-full">
-      <button
-        class="btn btn-primary btn-lg w-full"
-        :disabled="authStore.loading"
-        @click="findQuickMatch"
-      >
-        ⚔️ Tìm trận nhanh
+    <!-- Mode sections -->
+    <div class="grid grid-cols-2 gap-4 w-full">
+      <!-- Rank -->
+      <div class="card bg-base-100 shadow-md">
+        <div class="card-body items-center text-center gap-3 py-5 px-4">
+          <div class="flex items-center gap-1 w-full justify-center">
+            <div class="text-sm font-bold uppercase tracking-widest opacity-60">Xếp hạng</div>
+            <button
+              class="btn btn-xs btn-circle btn-ghost opacity-50 hover:opacity-100"
+              title="Bảng xếp hạng"
+              @click="showLeaderboard = true"
+            >🏆</button>
+            <button
+              class="btn btn-xs btn-circle btn-ghost opacity-50 hover:opacity-100"
+              title="Xem cấu hình rank"
+              @click="showRankConfig = true"
+            >ℹ️</button>
+          </div>
+          <span v-if="rankLoading" class="loading loading-spinner loading-sm opacity-50"></span>
+          <template v-else>
+            <TierBadge
+              v-if="playerStore.myRankProfile?.tier?.code"
+              :code="playerStore.myRankProfile.tier.code as TierCode"
+            />
+            <div v-else class="text-xs opacity-40">Chưa có rank</div>
+            <div v-if="playerStore.myRankProfile" class="text-xs opacity-50">
+              {{ playerStore.myRankProfile.point }} điểm
+            </div>
+          </template>
+          <button
+            class="btn btn-primary btn-sm w-full mt-1"
+            :disabled="authStore.loading"
+            @click="joinQueue('normal')"
+          >
+            ⚔️ Ghép trận
+          </button>
+        </div>
+      </div>
+
+      <!-- Casual -->
+      <div class="card bg-base-100 shadow-md">
+        <div class="card-body items-center text-center gap-3 py-5 px-4">
+          <div class="text-sm font-bold uppercase tracking-widest opacity-60">Thường</div>
+          <div class="text-3xl">🎮</div>
+          <div class="flex flex-col gap-2 w-full mt-1">
+            <button
+              class="btn btn-outline btn-sm w-full"
+              :disabled="authStore.loading"
+              @click="joinQueue()"
+            >
+              🔀 Ghép nhanh
+            </button>
+            <button class="btn btn-outline btn-sm w-full" :disabled="createLoading" @click="createMatch">
+              <span v-if="createLoading" class="loading loading-spinner loading-xs"></span>
+              🏟️ Tạo phòng
+            </button>
+            <button class="btn btn-outline btn-sm w-full" @click="showJoinModal = true">
+              🔍 Nhập mã
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex gap-2">
+      <button class="btn btn-ghost btn-sm opacity-60" @click="router.push('/history')">
+        📜 Lịch sử
       </button>
-      <button
-        class="btn btn-outline w-full"
-        :disabled="createLoading"
-        @click="createMatch"
-      >
-        <span v-if="createLoading" class="loading loading-spinner loading-sm"></span>
-        🏟️ Tạo trận
-      </button>
-      <button class="btn btn-outline w-full" @click="showJoinModal = true">
-        🔍 Tìm trận theo mã
-      </button>
-      <button class="btn btn-ghost btn-sm w-full opacity-60" @click="router.push('/history')">
-        📜 Lịch sử trận đấu
+      <button class="btn btn-ghost btn-sm opacity-60" @click="showGuide = true">
+        📖 Hướng dẫn
       </button>
     </div>
   </div>
 
   <!-- Create match modal -->
-  <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  <div
+    v-if="showCreateModal"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+  >
     <div class="card bg-base-100 shadow-xl w-80">
       <div class="card-body gap-4">
         <h3 class="card-title text-lg">Phòng đã tạo</h3>
         <p class="text-sm opacity-60">Chia sẻ mã này cho đối thủ để vào cùng phòng</p>
         <div class="flex items-center gap-2">
-          <span class="font-mono font-bold text-xl tracking-widest flex-1 text-center bg-base-200 py-2 px-3 rounded">
+          <span
+            class="font-mono font-bold text-xl tracking-widest flex-1 text-center bg-base-200 py-2 px-3 rounded"
+          >
             {{ createdRoomCode }}
           </span>
           <button class="btn btn-sm btn-ghost" @click="copyCode">📋</button>
@@ -183,7 +259,15 @@
           @keyup.enter="joinByCode"
         />
         <div class="flex gap-2">
-          <button class="btn btn-ghost flex-1" @click="showJoinModal = false; joinCode = ''">Hủy</button>
+          <button
+            class="btn btn-ghost flex-1"
+            @click="
+              showJoinModal = false;
+              joinCode = '';
+            "
+          >
+            Hủy
+          </button>
           <button
             class="btn btn-primary flex-1"
             :disabled="joinLoading || !joinCode.trim()"
@@ -196,4 +280,8 @@
       </div>
     </div>
   </div>
+
+  <LeaderboardModal v-if="showLeaderboard" @close="showLeaderboard = false" />
+  <RankConfigModal v-if="showRankConfig" @close="showRankConfig = false" />
+  <BattleGuideModal v-if="showGuide" @close="showGuide = false" />
 </template>

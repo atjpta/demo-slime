@@ -10,14 +10,23 @@
   const authStore = useAuthStore();
   const playerStore = usePlayerStore();
 
+  type FilterMode = "all" | "normal" | "casual";
+
   const items = ref<BattleLogItem[]>([]);
   const total = ref(0);
   const page = ref(1);
   const limit = 10;
   const onlyMine = ref(true);
+  const filterMode = ref<FilterMode>("all");
   const loading = ref(false);
 
   const totalPages = computed(() => Math.ceil(total.value / limit));
+
+  const displayItems = computed(() =>
+    filterMode.value === "casual"
+      ? items.value.filter((i) => !i.rankMode)
+      : items.value
+  );
 
   const endReasonLabel: Record<string, string> = {
     hp_depleted: "Hết HP",
@@ -34,6 +43,7 @@
       battleLogService.setToken(authStore.userToken);
       const res = await battleLogService.getList({
         playerId: onlyMine.value ? playerStore.myPlayerId : undefined,
+        rankMode: filterMode.value === "normal" ? "normal" : undefined,
         page: page.value,
         limit,
       });
@@ -48,6 +58,12 @@
 
   const changePage = (p: number) => {
     page.value = p;
+    load();
+  };
+
+  const changeFilter = (mode: FilterMode) => {
+    filterMode.value = mode;
+    page.value = 1;
     load();
   };
 
@@ -73,18 +89,28 @@
       </label>
     </div>
 
+    <div class="flex gap-1">
+      <button
+        v-for="f in ([['all','Tất cả'],['normal','Rank'],['casual','Thường']] as const)"
+        :key="f[0]"
+        class="btn btn-sm flex-1"
+        :class="filterMode === f[0] ? 'btn-primary' : 'btn-ghost opacity-60'"
+        @click="changeFilter(f[0])"
+      >{{ f[1] }}</button>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-12">
       <span class="loading loading-spinner loading-md"></span>
     </div>
 
     <!-- Empty -->
-    <div v-else-if="!items.length" class="text-center opacity-40 py-12">Chưa có trận đấu nào</div>
+    <div v-else-if="!displayItems.length" class="text-center opacity-40 py-12">Chưa có trận đấu nào</div>
 
     <!-- List -->
     <div v-else class="flex flex-col gap-2">
       <div
-        v-for="item in items"
+        v-for="item in displayItems"
         :key="item._id"
         class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
         @click="router.push(`/history/${item._id}`)"
@@ -108,7 +134,11 @@
               </span>
               <span v-if="!item.winner" class="text-xs opacity-40 italic">hòa</span>
             </div>
-            <div class="text-xs opacity-40 mt-0.5">
+            <div class="text-xs opacity-40 mt-0.5 flex items-center gap-1.5">
+              <span
+                class="badge badge-xs"
+                :class="item.rankMode ? 'badge-warning' : 'badge-ghost'"
+              >{{ item.rankMode ? 'Rank' : 'Thường' }}</span>
               {{ endReasonLabel[item.endReason] ?? item.endReason }} ·
               {{ formatDate(item.createdAt) }}
             </div>

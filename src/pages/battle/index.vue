@@ -4,7 +4,7 @@
   import { toast } from "vue-sonner";
   import { usePlayerStore, useBattleStore } from "@/stores";
   import { battleRoom, playerService } from "@/client";
-  import type { BattleHandlers } from "@/client";
+  import type { BattleHandlers, RankUpdateData } from "@/client";
   import { Phase, TURNS_PER_WAVE } from "@/constants";
   import PlayerCard from "./components/PlayerCard.vue";
   import ActionPicker from "./components/ActionPicker.vue";
@@ -20,6 +20,7 @@
   const selectedActions = ref<number[]>(Array(TURNS_PER_WAVE).fill(0));
   const actionsSubmitted = ref(false);
   const result = ref<"win" | "lose" | "draw" | null>(null);
+  const rankUpdate = ref<RankUpdateData | null>(null);
   const showGuide = ref(false);
 
   const mySkills = computed(() => battleStore.initPlayers[playerStore.myPlayerId]?.skills ?? []);
@@ -143,6 +144,12 @@
       const [first, ...logs] = logRaws;
       battleStore.logs = logs;
     },
+    onRankUpdate: (data) => {
+      rankUpdate.value = data;
+      if (playerStore.myRankProfile) {
+        playerStore.myRankProfile.point = data.newPoint;
+      }
+    },
     onLeave: (code) => handleLeave(code),
     onError: (_code, msg) => toast.error(`Battle: ${msg}`),
   };
@@ -163,8 +170,7 @@
   }
 
   async function handleLeave(code: number) {
-    // 1000 = đóng bình thường; nếu trận đã kết thúc thì không reconnect
-    const isIntentional = code === 1000 || battleStore.phase === Phase.ENDED;
+    const isIntentional = code === 1000 || battleStore.phase === Phase.ENDED || result.value !== null;
     battleStore.rooms.battle = null;
 
     if (isIntentional || battleStore.isReconnecting) return;
@@ -283,6 +289,7 @@
         :stats="getStats(playerStore.myPlayerId)"
         :init-hp="battleStore.initPlayers[playerStore.myPlayerId]?.stats?.hp"
         :ready="battleStore.phase === Phase.SELECTING && battleStore.playerReady[playerStore.myPlayerId]"
+        :tier-code="battleStore.initPlayers[playerStore.myPlayerId]?.tierCode"
       />
       <PlayerCard
         label="Đối thủ"
@@ -291,6 +298,7 @@
         :stats="opponentId ? getStats(opponentId) : null"
         :init-hp="opponentId ? battleStore.initPlayers[opponentId]?.stats?.hp : null"
         :ready="battleStore.phase === Phase.SELECTING && !!opponentId && battleStore.playerReady[opponentId]"
+        :tier-code="opponentId ? battleStore.initPlayers[opponentId]?.tierCode : null"
       />
     </div>
 
@@ -331,6 +339,6 @@
     <span class="loading loading-spinner loading-lg"></span>
   </div>
 
-  <BattleResultModal v-if="result" :result="result" @confirm="confirmResult" />
+  <BattleResultModal v-if="result" :result="result" :rank-update="rankUpdate" @confirm="confirmResult" />
   <BattleGuideModal v-if="showGuide" @close="showGuide = false" />
 </template>

@@ -7,10 +7,14 @@ export type QueueHandlers = {
 };
 
 export class QueueRoom extends BaseClient {
-  async join(playerToken: string, handlers: QueueHandlers): Promise<Room> {
+  async join(
+    playerToken: string,
+    handlers: QueueHandlers,
+    rankMode?: "normal" | "balance",
+  ): Promise<Room> {
     this.setToken(playerToken);
 
-    const room = await colyseus.joinOrCreate("queue", { token: playerToken });
+    const room = await colyseus.joinOrCreate("queue", { token: playerToken, rankMode });
 
     room.onMessage("clients", (count: number) => {
       console.log("[queue] players in group:", count);

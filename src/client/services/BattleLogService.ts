@@ -23,6 +23,7 @@ export type BattleLogItem = {
   players: BattleLogPlayer[];
   winner: { _id: string; name: string } | null;
   endReason: string;
+  rankMode: "normal" | "balance" | null;
   createdAt: string;
 };
 
@@ -36,9 +37,15 @@ export type BattleLogPagination = {
 };
 
 export class BattleLogService extends BaseClient {
-  async getList(params: { playerId?: string; page?: number; limit?: number } = {}): Promise<BattleLogPagination> {
+  async getList(params: {
+    playerId?: string;
+    rankMode?: "normal" | "balance";
+    page?: number;
+    limit?: number;
+  } = {}): Promise<BattleLogPagination> {
     const query = new URLSearchParams();
     if (params.playerId) query.set("playerId", params.playerId);
+    if (params.rankMode) query.set("rankMode", params.rankMode);
     if (params.page) query.set("page", String(params.page));
     if (params.limit) query.set("limit", String(params.limit));
     const qs = query.toString();

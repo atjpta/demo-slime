@@ -1,5 +1,7 @@
 <script setup lang="ts">
   import { computed } from "vue";
+  import TierBadge from "@/components/TierBadge.vue";
+  import type { TierCode } from "@/constants";
 
   const props = defineProps<{
     label: string;
@@ -8,6 +10,7 @@
     initHp?: number | null;
     variant: "primary" | "error";
     ready?: boolean;
+    tierCode?: string | null;
   }>();
 
   const maxHp = computed(() => props.initHp ?? props.stats?.hp ?? null);
@@ -35,8 +38,11 @@
       class="flex items-center justify-between px-3 py-2"
       :class="variant === 'primary' ? 'bg-primary/10' : 'bg-error/10'"
     >
-      <span class="font-bold text-sm truncate leading-tight">{{ name ?? "..." }}</span>
-      <span v-if="ready" class="badge badge-xs badge-success shrink-0">Đã sẵn sàng</span>
+      <div class="flex items-center gap-1.5 min-w-0">
+        <span class="font-bold text-sm truncate leading-tight">{{ name ?? "..." }}</span>
+        <TierBadge v-if="tierCode" :code="tierCode as TierCode" class="text-xs" />
+      </div>
+      <span v-if="ready" class="text-green-500 shrink-0 text-base leading-none">✔</span>
     </div>
 
     <div class="px-3 pt-2.5 pb-3 flex flex-col gap-2.5">

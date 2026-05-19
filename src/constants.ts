@@ -16,6 +16,26 @@ export const PHASE_LABEL: Record<string, string> = {
   ended: "Kết thúc",
 };
 
+import bronzeImg   from "@/assets/imgs/rank/bronze.png";
+import silverImg   from "@/assets/imgs/rank/silver.png";
+import goldImg     from "@/assets/imgs/rank/gold.png";
+import platinumImg from "@/assets/imgs/rank/platinum.png";
+import emeraldImg  from "@/assets/imgs/rank/emerald.png";
+import diamondImg  from "@/assets/imgs/rank/diamond.png";
+import masterImg   from "@/assets/imgs/rank/master.png";
+
+export type TierCode = "bronze" | "silver" | "gold" | "platinum" | "emerald" | "diamond" | "master";
+
+export const TIER_META: Record<TierCode, { label: string; img: string; color: string }> = {
+  bronze:   { label: "Đồng",     img: bronzeImg,   color: "text-amber-600"  },
+  silver:   { label: "Bạc",      img: silverImg,   color: "text-slate-400"  },
+  gold:     { label: "Vàng",     img: goldImg,     color: "text-yellow-400" },
+  platinum: { label: "Bạch Kim", img: platinumImg, color: "text-cyan-300"   },
+  emerald:  { label: "Lục Bảo",  img: emeraldImg,  color: "text-green-400"  },
+  diamond:  { label: "Kim Cương", img: diamondImg, color: "text-blue-400"   },
+  master:   { label: "Cao Thủ",  img: masterImg,   color: "text-purple-500" },
+};
+
 export const SKILL_META: Record<string, { icon: string; label: string; color: string }> = {
   "attack-001": { icon: "⚔️", label: "Tấn Công", color: "btn-error" },
   "spell-001": { icon: "✨", label: "Phép Thuật", color: "btn-info" },

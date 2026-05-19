@@ -6,6 +6,7 @@ export type InitPlayerData = {
   name: string;
   stats: { hp: number; attack: number; magic: number; defense: number } | null;
   skills: { code: string; type: string }[];
+  tierCode: string | null;
 };
 
 const RECONNECT_TOKEN_KEY = "battle_reconnect_token";

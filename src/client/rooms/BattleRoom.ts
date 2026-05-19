@@ -10,6 +10,13 @@ import {
 } from "@/schemas";
 import type { InitPlayerData } from "@/stores/battle.store";
 
+export type RankUpdateData = {
+  oldPoint: number;
+  newPoint: number;
+  point: number;
+  result: "win" | "lose" | "draw";
+};
+
 export type BattleHandlers = {
   onPhaseChange: (phase: string) => void;
   onWaveChange: (wave: number) => void;
@@ -21,6 +28,7 @@ export type BattleHandlers = {
   onInitPlayersChange: (playerId: string, data: InitPlayerData) => void;
   onLogAdd: (log: BattleTurnLogState) => void;
   onLogAddReconnect: (logs: BattleTurnLogState[]) => void;
+  onRankUpdate: (data: RankUpdateData) => void;
   onLeave: (code: number) => void;
   onError: (code: number, msg: string) => void;
 };
@@ -74,7 +82,12 @@ export class BattleRoom extends BaseClient {
 
     room.onMessage(
       "battle_init",
-      (data: { players: Record<string, any>; skills: Record<string, any[]>; logs: any[] }) => {
+      (data: {
+        players: Record<string, any>;
+        skills: Record<string, any[]>;
+        logs: any[];
+        rankProfiles?: Record<string, any>;
+      }) => {
         for (const [pid, player] of Object.entries(data.players)) {
           const skills = (data.skills[pid] ?? []).map((s: any) => ({ code: s.code, type: s.type }));
           const rawStats = player.stats;
@@ -86,7 +99,8 @@ export class BattleRoom extends BaseClient {
                 defense: rawStats.defense,
               }
             : null;
-          handlers.onInitPlayersChange(pid, { name: player.name, stats, skills });
+          const tierCode = data.rankProfiles?.[pid]?.tier?.code ?? null;
+          handlers.onInitPlayersChange(pid, { name: player.name, stats, skills, tierCode });
         }
         handlers.onLogAddReconnect(data.logs.map((e) => normalizeLog(e)));
       }
@@ -94,6 +108,10 @@ export class BattleRoom extends BaseClient {
 
     room.onMessage("battle_log", (raw: any) => {
       handlers.onLogAdd(normalizeLog(raw));
+    });
+
+    room.onMessage("rank_update", (data: RankUpdateData) => {
+      handlers.onRankUpdate(data);
     });
 
     room.onLeave((code) => handlers.onLeave(code));
