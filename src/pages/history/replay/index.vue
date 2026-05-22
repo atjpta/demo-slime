@@ -2,14 +2,18 @@
   import { ref, computed, onMounted, onUnmounted } from "vue";
   import { useRoute, useRouter } from "vue-router";
   import { toast } from "vue-sonner";
-  import { useAuthStore } from "@/stores";
+  import { useAuthStore, usePlayerStore } from "@/stores";
   import { battleLogService } from "@/client";
   import type { BattleLogDetail, BattleLogTurn } from "@/client";
   import { SKILL_META, SKILL_COUNTER } from "@/constants";
+  import slimeGif from "@/assets/slime/idle_right.gif";
+  import TurnLogList from "@/components/TurnLogList.vue";
+  import type { LogGroup } from "@/components/TurnLogList.vue";
 
   const route = useRoute();
   const router = useRouter();
   const authStore = useAuthStore();
+  const playerStore = usePlayerStore();
 
   const detail = ref<BattleLogDetail | null>(null);
   const loading = ref(true);
@@ -23,14 +27,25 @@
     return [...detail.value.logs].sort((a, b) => a.wave - b.wave || a.turn - b.turn);
   });
 
-  // Two players — p0 = index 0, p1 = index 1
-  const p0 = computed(() => detail.value?.players[0] ?? null);
-  const p1 = computed(() => detail.value?.players[1] ?? null);
+  // p0 = tôi nếu có trong trận, fallback players[0]
+  const p0 = computed(
+    () =>
+      detail.value?.players.find((p) => p.player._id === playerStore.myPlayerId) ??
+      detail.value?.players[0] ??
+      null
+  );
+  // p1 = player khác với p0 (không dùng myPlayerId để tránh sai khi xem trận người khác)
+  const p1 = computed(
+    () =>
+      detail.value?.players.find((p) => p.player._id !== p0.value?.player._id) ??
+      null
+  );
 
   const p0Id = computed(() => p0.value?.player._id ?? "");
   const p1Id = computed(() => p1.value?.player._id ?? "");
 
-  const initHp = (idx: 0 | 1) => detail.value?.players[idx]?.stats.hp ?? 1;
+  const p0InitHp = computed(() => p0.value?.stats.hp ?? 1);
+  const p1InitHp = computed(() => p1.value?.stats.hp ?? 1);
 
   // Khi không replay: dùng turn cuối; khi replay: dùng turnIdx hiện tại
   const activeTurnIdx = computed(() =>
@@ -66,32 +81,71 @@
     return s ? (SKILL_META[s.code]?.icon ?? "❓") : "…";
   };
 
-  const waveGroups = computed(() => {
+  const normalizedGroups = computed<LogGroup[]>(() => {
+    if (!p0.value || !p1.value) return [];
     const map = new Map<number, any[]>();
     for (let i = 0; i < visibleLogs.value.length; i++) {
       const log = visibleLogs.value[i];
       if (!map.has(log.wave)) map.set(log.wave, []);
-      const p0d = log.players[p0Id.value];
-      const p1d = log.players[p1Id.value];
-      const p0Skill = getSkill(p0.value, p0d?.action ?? -1);
-      const p1Skill = getSkill(p1.value, p1d?.action ?? -1);
-      const ctr = p0Skill && p1Skill
-        ? (SKILL_COUNTER[`${p0Skill.type}_vs_${p1Skill.type}`] ?? null)
-        : null;
+      const myD = log.players[p0Id.value];
+      const oppD = log.players[p1Id.value];
+      const mySkill = getSkill(p0.value, myD?.action ?? -1);
+      const oppSkill = getSkill(p1.value, oppD?.action ?? -1);
       map.get(log.wave)!.push({
         wave: log.wave,
         turn: log.turn,
-        p0: p0d,
-        p1: p1d,
-        p0Damage: (p0d?.damageReceive ?? []).reduce((s: number, e: any) => s + e.value, 0),
-        p1Damage: (p1d?.damageReceive ?? []).reduce((s: number, e: any) => s + e.value, 0),
-        counter: ctr,
+        myHp: myD?.stats.hp ?? "?",
+        myDamage: (myD?.damageReceive ?? []).reduce((s: number, e: any) => s + e.value, 0),
+        mySkillIcon: skillIcon(p0.value, myD?.action ?? -1),
+        oppHp: oppD?.stats.hp ?? "?",
+        oppDamage: (oppD?.damageReceive ?? []).reduce((s: number, e: any) => s + e.value, 0),
+        oppSkillIcon: skillIcon(p1.value, oppD?.action ?? -1),
+        counter: mySkill && oppSkill ? (SKILL_COUNTER[`${mySkill.type}_vs_${oppSkill.type}`] ?? null) : null,
         isActive: isReplayMode.value && i === turnIdx.value,
       });
     }
     return [...map.entries()]
       .sort(([a], [b]) => b - a)
       .map(([wave, logs]) => ({ wave, logs: [...logs].sort((a, b) => b.turn - a.turn) }));
+  });
+
+  // ─── Arena computeds ─────────────────────────────────────────────────────
+  const totalDmg = (effects: any[]) =>
+    (effects ?? []).reduce((s: number, e: any) => s + (e.value ?? 0), 0);
+
+  const p0Dmg = computed(() => totalDmg(activeLog.value?.players[p0Id.value]?.damageReceive ?? []));
+  const p1Dmg = computed(() => totalDmg(activeLog.value?.players[p1Id.value]?.damageReceive ?? []));
+
+  const p0ClashIcon = computed(() => {
+    const action = activeLog.value?.players[p0Id.value]?.action ?? -1;
+    const s = getSkill(p0.value, action);
+    return s ? (SKILL_META[s.code]?.icon ?? "❓") : null;
+  });
+
+  const p1ClashIcon = computed(() => {
+    const action = activeLog.value?.players[p1Id.value]?.action ?? -1;
+    const s = getSkill(p1.value, action);
+    return s ? (SKILL_META[s.code]?.icon ?? "❓") : null;
+  });
+
+  const p0Counter = computed(() => {
+    if (!activeLog.value) return null;
+    const a0 = activeLog.value.players[p0Id.value]?.action ?? -1;
+    const a1 = activeLog.value.players[p1Id.value]?.action ?? -1;
+    const s0 = getSkill(p0.value, a0);
+    const s1 = getSkill(p1.value, a1);
+    if (!s0 || !s1) return null;
+    return SKILL_COUNTER[`${s0.type}_vs_${s1.type}`] ?? null;
+  });
+
+  const p1Counter = computed(() => {
+    if (!activeLog.value) return null;
+    const a0 = activeLog.value.players[p0Id.value]?.action ?? -1;
+    const a1 = activeLog.value.players[p1Id.value]?.action ?? -1;
+    const s0 = getSkill(p0.value, a0);
+    const s1 = getSkill(p1.value, a1);
+    if (!s0 || !s1) return null;
+    return SKILL_COUNTER[`${s1.type}_vs_${s0.type}`] ?? null;
   });
 
   const endReasonLabel: Record<string, string> = {
@@ -102,25 +156,36 @@
 
   const isReplayMode = ref(false);
   const isAutoPlaying = ref(false);
+  const autoFinished = ref(false);
 
-  const stopAuto = () => {
+  const stopAuto = (finished = false) => {
     isAutoPlaying.value = false;
-    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    autoFinished.value = finished;
+    if (autoTimer) {
+      clearInterval(autoTimer);
+      autoTimer = null;
+    }
   };
 
   const startAuto = () => {
     if (isAutoPlaying.value) return;
     isAutoPlaying.value = true;
+    autoFinished.value = false;
     autoTimer = setInterval(() => {
       if (turnIdx.value < sortedLogs.value.length - 1) {
         turnIdx.value++;
       } else {
-        stopAuto();
+        stopAuto(true);
       }
     }, 1200);
   };
 
   const toggleAuto = () => (isAutoPlaying.value ? stopAuto() : startAuto());
+
+  const replayFromStart = () => {
+    turnIdx.value = 0;
+    startAuto();
+  };
 
   const prev = () => {
     stopAuto();
@@ -160,7 +225,9 @@
 <template>
   <div class="container mx-auto max-w-3xl p-4 flex flex-col gap-4">
     <!-- Back -->
-    <button class="btn btn-ghost btn-sm self-start" @click="router.push('/history')">← Quay lại</button>
+    <button class="btn btn-ghost btn-sm self-start" @click="router.push('/history')">
+      ← Quay lại
+    </button>
 
     <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-20">
@@ -180,8 +247,12 @@
         <!-- P0 card -->
         <div class="rounded-none bg-base-100 shadow-lg overflow-hidden ring-2 ring-primary/50">
           <div class="flex items-center justify-between px-3 py-2 bg-primary/10">
-            <span class="font-bold text-sm truncate leading-tight">{{ p0?.player.name ?? "..." }}</span>
-            <span v-if="detail.winner?._id === p0Id" class="badge badge-xs badge-success shrink-0">Thắng</span>
+            <span class="font-bold text-sm truncate leading-tight">{{
+              p0?.player.name ?? "..."
+            }}</span>
+            <span v-if="detail.winner?._id === p0Id" class="badge badge-xs badge-success shrink-0"
+              >Thắng</span
+            >
           </div>
           <div class="px-3 pt-2.5 pb-3 flex flex-col gap-2.5">
             <div class="flex items-center gap-2">
@@ -190,13 +261,14 @@
                 <div class="absolute inset-0 bg-base-300 overflow-hidden">
                   <div
                     class="h-full transition-all duration-700 ease-out"
-                    :class="hpBarClass(hpPercent(p0Id, initHp(0)))"
-                    :style="{ width: `${hpPercent(p0Id, initHp(0))}%` }"
+                    :class="hpBarClass(hpPercent(p0Id, p0InitHp))"
+                    :style="{ width: `${hpPercent(p0Id, p0InitHp)}%` }"
                   />
                 </div>
                 <div class="absolute inset-0 flex items-center justify-center text-white">
                   <span class="font-mono font-extrabold text-sm leading-none">
-                    {{ turnData(p0Id)?.stats.hp ?? initHp(0) }}<span class="font-normal text-xs"> / {{ initHp(0) }}</span>
+                    {{ turnData(p0Id)?.stats.hp ?? p0InitHp
+                    }}<span class="font-normal text-xs"> / {{ p0InitHp }}</span>
                   </span>
                 </div>
               </div>
@@ -212,8 +284,12 @@
         <!-- P1 card -->
         <div class="rounded-none bg-base-100 shadow-lg overflow-hidden ring-2 ring-error/50">
           <div class="flex items-center justify-between px-3 py-2 bg-error/10">
-            <span class="font-bold text-sm truncate leading-tight">{{ p1?.player.name ?? "..." }}</span>
-            <span v-if="detail.winner?._id === p1Id" class="badge badge-xs badge-success shrink-0">Thắng</span>
+            <span class="font-bold text-sm truncate leading-tight">{{
+              p1?.player.name ?? "..."
+            }}</span>
+            <span v-if="detail.winner?._id === p1Id" class="badge badge-xs badge-success shrink-0"
+              >Thắng</span
+            >
           </div>
           <div class="px-3 pt-2.5 pb-3 flex flex-col gap-2.5">
             <div class="flex items-center gap-2">
@@ -222,13 +298,14 @@
                 <div class="absolute inset-0 bg-base-300 overflow-hidden">
                   <div
                     class="h-full transition-all duration-700 ease-out"
-                    :class="hpBarClass(hpPercent(p1Id, initHp(1)))"
-                    :style="{ width: `${hpPercent(p1Id, initHp(1))}%` }"
+                    :class="hpBarClass(hpPercent(p1Id, p1InitHp))"
+                    :style="{ width: `${hpPercent(p1Id, p1InitHp)}%` }"
                   />
                 </div>
                 <div class="absolute inset-0 flex items-center justify-center text-white">
                   <span class="font-mono font-extrabold text-sm leading-none">
-                    {{ turnData(p1Id)?.stats.hp ?? initHp(1) }}<span class="font-normal text-xs"> / {{ initHp(1) }}</span>
+                    {{ turnData(p1Id)?.stats.hp ?? p1InitHp
+                    }}<span class="font-normal text-xs"> / {{ p1InitHp }}</span>
                   </span>
                 </div>
               </div>
@@ -242,6 +319,105 @@
         </div>
       </div>
 
+      <!-- Slime Arena -->
+      <div
+        class="relative bg-base-100 shadow-md grid grid-cols-[1fr_auto_1fr] items-end px-3 pb-3 gap-1"
+      >
+        <!-- P0 slime -->
+        <div class="flex flex-col items-center gap-1 relative">
+          <div
+            class="absolute bottom-full left-0 right-0 flex justify-center pb-1 pointer-events-none"
+            style="height: 40px; align-items: flex-end"
+          >
+            <Transition name="bubble" mode="out-in">
+              <div v-if="p0Counter?.win" :key="activeTurnIdx" class="flex flex-col items-center">
+                <div
+                  class="px-4 py-1.5 bg-success text-success-content whitespace-nowrap"
+                  style="
+                    transform: skewX(-14deg);
+                    box-shadow: 0 3px 12px -2px oklch(var(--su) / 0.6);
+                  "
+                >
+                  <span
+                    class="block text-[11px] font-black uppercase tracking-widest leading-none"
+                    style="transform: skewX(14deg); text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.25)"
+                    >{{ p0Counter.icon }} {{ p0Counter.label }}!</span
+                  >
+                </div>
+                <div class="w-2.5 h-2.5 bg-success rotate-45 -mt-1.5"></div>
+              </div>
+            </Transition>
+          </div>
+          <div class="relative">
+            <span
+              v-if="p0Dmg > 0"
+              :key="activeTurnIdx"
+              class="dmg-float absolute top-1/2 left-1/2 text-error font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
+              >-{{ p0Dmg }}</span
+            >
+            <img :src="slimeGif" class="h-24 w-auto object-contain" />
+          </div>
+          <span class="text-[11px] font-bold text-primary truncate max-w-[72px]">{{
+            p0?.player.name ?? "P1"
+          }}</span>
+        </div>
+
+        <!-- Center clash zone -->
+        <div class="flex flex-col items-center justify-center h-full w-full">
+          <div :key="activeTurnIdx" class="flex items-center gap-1.5">
+            <span v-if="p0ClashIcon" class="text-2xl w-8 text-center">{{ p0ClashIcon }}</span>
+            <span v-else class="text-2xl w-8 opacity-0 select-none">·</span>
+            <div class="flex items-center justify-center w-12 shrink-0 mx-0.5">
+              <div class="relative w-12 h-10 flex items-center justify-center pointer-events-none">
+                <div class="absolute w-6 h-6 rotate-45 bg-base-content opacity-10 rounded-sm"></div>
+                <span class="relative z-10 text-base opacity-20">⚔️</span>
+              </div>
+            </div>
+            <span v-if="p1ClashIcon" class="text-2xl w-8 text-center">{{ p1ClashIcon }}</span>
+            <span v-else class="text-2xl w-8 opacity-0 select-none">·</span>
+          </div>
+        </div>
+
+        <!-- P1 slime -->
+        <div class="flex flex-col items-center gap-1 relative">
+          <div
+            class="absolute bottom-full left-0 right-0 flex justify-center pb-1 pointer-events-none"
+            style="height: 40px; align-items: flex-end"
+          >
+            <Transition name="bubble" mode="out-in">
+              <div v-if="p1Counter?.win" :key="activeTurnIdx" class="flex flex-col items-center">
+                <div
+                  class="px-4 py-1.5 bg-error text-error-content whitespace-nowrap"
+                  style="
+                    transform: skewX(14deg);
+                    box-shadow: 0 3px 12px -2px oklch(var(--er) / 0.6);
+                  "
+                >
+                  <span
+                    class="block text-[11px] font-black uppercase tracking-widest leading-none"
+                    style="transform: skewX(-14deg); text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.25)"
+                    >{{ p1Counter.icon }} {{ p1Counter.label }}!</span
+                  >
+                </div>
+                <div class="w-2.5 h-2.5 bg-error rotate-45 -mt-1.5"></div>
+              </div>
+            </Transition>
+          </div>
+          <div class="relative">
+            <span
+              v-if="p1Dmg > 0"
+              :key="activeTurnIdx"
+              class="dmg-float absolute top-1/2 left-1/2 text-error font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
+              >-{{ p1Dmg }}</span
+            >
+            <img :src="slimeGif" class="h-24 w-auto object-contain -scale-x-100" />
+          </div>
+          <span class="text-[11px] font-bold text-error truncate max-w-[72px]">{{
+            p1?.player.name ?? "P2"
+          }}</span>
+        </div>
+      </div>
+
       <!-- Progress + controls -->
       <div class="flex flex-col gap-2">
         <template v-if="isReplayMode">
@@ -249,16 +425,33 @@
             <span>Lượt {{ turnIdx + 1 }} / {{ sortedLogs.length }}</span>
             <span v-if="activeLog">Wave {{ activeLog.wave }} · Turn {{ activeLog.turn }}</span>
           </div>
-          <progress class="progress progress-primary w-full" :value="turnIdx" :max="sortedLogs.length - 1" />
+          <progress
+            class="progress progress-primary w-full"
+            :value="turnIdx"
+            :max="sortedLogs.length - 1"
+          />
           <div class="flex items-center justify-center gap-2">
-            <button class="btn btn-sm btn-ghost" :disabled="turnIdx === 0" @click="prev">◀ Prev</button>
-            <button class="btn btn-sm btn-primary w-24" @click="toggleAuto">
+            <button class="btn btn-sm btn-ghost" :disabled="turnIdx === 0" @click="prev">
+              ◀ Prev
+            </button>
+            <button v-if="autoFinished" class="btn btn-sm btn-primary w-24" @click="replayFromStart">
+              ↺ Chơi lại
+            </button>
+            <button v-else class="btn btn-sm btn-primary w-24" @click="toggleAuto">
               {{ isAutoPlaying ? "⏸ Dừng" : "▶ Auto" }}
             </button>
-            <button class="btn btn-sm btn-ghost" :disabled="turnIdx === sortedLogs.length - 1" @click="next">Next ▶</button>
+            <button
+              class="btn btn-sm btn-ghost"
+              :disabled="turnIdx === sortedLogs.length - 1"
+              @click="next"
+            >
+              Next ▶
+            </button>
           </div>
           <div class="flex justify-center">
-            <button class="btn btn-xs btn-ghost opacity-50" @click="exitReplay">Thoát replay</button>
+            <button class="btn btn-xs btn-ghost opacity-50" @click="exitReplay">
+              Thoát replay
+            </button>
           </div>
         </template>
         <div v-else class="flex justify-center">
@@ -267,49 +460,62 @@
       </div>
 
       <!-- Turn log list (grouped by wave) -->
-      <div v-if="waveGroups.length" class="bg-base-100 shadow-md rounded-none">
-        <div class="p-3 gap-2 flex flex-col">
-          <div v-for="group in waveGroups" :key="group.wave">
-            <div class="flex items-center gap-2 mb-1.5">
-              <div class="flex-1 h-px bg-base-300"></div>
-              <span class="text-[10px] font-bold opacity-40 uppercase tracking-widest">Wave {{ group.wave }}</span>
-              <div class="flex-1 h-px bg-base-300"></div>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <div
-                v-for="log in group.logs"
-                :key="`${log.wave}-${log.turn}`"
-                class="grid items-center px-3 py-2 text-xs transition-colors"
-                :class="log.isActive ? 'bg-primary/15 ring-1 ring-primary/30' : 'bg-base-200'"
-                style="grid-template-columns: auto 1fr 9rem 1fr"
-              >
-                <div></div>
-                <!-- P0 -->
-                <div class="flex items-center justify-end gap-2 tabular-nums">
-                  <span class="font-bold text-primary">{{ log.p0?.stats.hp ?? "?" }}</span>
-                  <span v-if="log.p0Damage > 0" class="text-error font-semibold w-10 text-center">-{{ log.p0Damage }}❤️</span>
-                  <span v-else class="opacity-25 w-10 text-center">❤️</span>
-                  <span>{{ skillIcon(p0, log.p0?.action ?? -1) }}</span>
-                </div>
-                <!-- Counter -->
-                <div class="flex justify-center w-full">
-                  <span v-if="log.counter" class="badge badge-xs font-bold w-fit py-2 justify-center" :class="log.counter.color">
-                    {{ log.counter.icon }} {{ log.counter.label }}
-                  </span>
-                  <span v-else class="opacity-20">⚔️</span>
-                </div>
-                <!-- P1 -->
-                <div class="flex items-center gap-2 tabular-nums">
-                  <span>{{ skillIcon(p1, log.p1?.action ?? -1) }}</span>
-                  <span v-if="log.p1Damage > 0" class="text-error font-semibold w-10 text-center">-{{ log.p1Damage }}❤️</span>
-                  <span v-else class="opacity-25 w-10 text-center">❤️</span>
-                  <span class="font-bold text-error">{{ log.p1?.stats.hp ?? "?" }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <TurnLogList :groups="normalizedGroups" />
     </template>
   </div>
 </template>
+
+<style scoped>
+  .dmg-float {
+    animation: dmg-float 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes dmg-float {
+    0% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(0px) scale(0.75);
+    }
+    10% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-6px) scale(1.2);
+    }
+    20% {
+      transform: translateX(-50%) translateY(-10px) scale(1);
+    }
+    70% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-48px) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-72px) scale(0.95);
+    }
+  }
+
+  .bubble-enter-active {
+    animation: bubble-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    opacity: 0;
+  }
+  .bubble-leave-active {
+    animation: bubble-out 0.05s ease-in forwards;
+  }
+  @keyframes bubble-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.5) translateY(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  @keyframes bubble-out {
+    0% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.8);
+    }
+  }
+</style>

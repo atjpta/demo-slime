@@ -17,8 +17,18 @@
 
 <template>
   <div class="modal modal-open">
-    <div class="modal-box rounded-none text-center">
-      <div class="text-6xl mb-3">{{ META[result].icon }}</div>
+    <div
+      v-motion
+      :initial="{ opacity: 0, scale: 0.8, y: 40 }"
+      :enter="{ opacity: 1, scale: 1, y: 0, transition: { duration: 400, ease: 'easeOut' } }"
+      class="modal-box rounded-none text-center"
+    >
+      <div
+        v-motion
+        :initial="{ scale: 0, rotate: -20 }"
+        :enter="{ scale: 1, rotate: 0, transition: { delay: 200, duration: 500, type: 'spring', stiffness: 200 } }"
+        class="text-6xl mb-3"
+      >{{ META[result].icon }}</div>
       <h3 class="font-bold text-2xl mb-1" :class="META[result].cls">{{ META[result].title }}</h3>
       <p class="text-base-content/60 mb-4">{{ META[result].desc }}</p>
 

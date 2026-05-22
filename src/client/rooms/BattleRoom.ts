@@ -26,7 +26,7 @@ export type BattleHandlers = {
   onActionsChange: (playerId: string, actions: number[]) => void;
   onPlayerReadyChange: (playerId: string, ready: boolean) => void;
   onInitPlayersChange: (playerId: string, data: InitPlayerData) => void;
-  onLogAdd: (log: BattleTurnLogState) => void;
+  onLogAdd: (logs: BattleTurnLogState[]) => void;
   onLogAddReconnect: (logs: BattleTurnLogState[]) => void;
   onRankUpdate: (data: RankUpdateData) => void;
   onLeave: (code: number) => void;
@@ -63,10 +63,17 @@ export class BattleRoom extends BaseClient {
     const callbacks = Callbacks.get(room as any) as any;
     const state = room.state as any;
 
-    callbacks.listen("phase", (phase: string) => handlers.onPhaseChange(phase), true);
+    callbacks.listen(
+      "phase",
+      (phase: string) => {
+        // console.log(phase);
+        handlers.onPhaseChange(phase);
+      },
+      true
+    );
     callbacks.listen("wave", (wave: number) => handlers.onWaveChange(wave), true);
     callbacks.listen("timeLeft", (timeLeft: number) => handlers.onTimeLeftChange(timeLeft), true);
-    callbacks.listen("winner", (winner: string) => handlers.onWinnerChange(winner), true);
+    callbacks.listen("winner", (winner: string) => handlers.onWinnerChange(winner));
 
     callbacks.onAdd("players", (player: any, pid: string) => {
       handlers.onPlayersChange([...state.players.keys()]);
@@ -106,8 +113,8 @@ export class BattleRoom extends BaseClient {
       }
     );
 
-    room.onMessage("battle_log", (raw: any) => {
-      handlers.onLogAdd(normalizeLog(raw));
+    room.onMessage("battle_log", (raws: any[]) => {
+      handlers.onLogAdd(raws.map(normalizeLog));
     });
 
     room.onMessage("rank_update", (data: RankUpdateData) => {
@@ -121,6 +128,17 @@ export class BattleRoom extends BaseClient {
   async create(playerToken: string): Promise<Room> {
     this.setToken(playerToken);
     return colyseus.create("battle");
+  }
+
+  onBattleStart(room: Room, callback: () => void): void {
+    const callbacks = Callbacks.get(room as any) as any;
+    callbacks.listen(
+      "phase",
+      (phase: string) => {
+        if (phase && phase !== "waiting") callback();
+      },
+      true
+    );
   }
 
   async joinById(roomId: string, playerToken: string): Promise<Room> {

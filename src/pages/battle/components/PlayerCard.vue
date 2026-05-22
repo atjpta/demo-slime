@@ -30,22 +30,27 @@
 
 <template>
   <div
+    v-motion
+    :initial="{ opacity: 0, y: variant === 'primary' ? -16 : 16 }"
+    :enter="{ opacity: 1, y: 0, transition: { duration: 350, ease: 'easeOut' } }"
     class="rounded-none bg-base-100 shadow-lg overflow-hidden"
     :class="variant === 'primary' ? 'ring-2 ring-primary/50' : 'ring-2 ring-error/50'"
   >
     <!-- Header -->
     <div
-      class="flex items-center justify-between px-3 py-2"
+      class="flex items-center justify-between py-2"
       :class="variant === 'primary' ? 'bg-primary/10' : 'bg-error/10'"
     >
       <div class="flex items-center gap-1.5 min-w-0">
-        <span class="font-bold text-sm truncate leading-tight">{{ name ?? "..." }}</span>
-        <TierBadge v-if="tierCode" :code="tierCode as TierCode" class="text-xs" />
+        <div class="flex items-center">
+          <TierBadge :is-show-label="false" :code="tierCode as TierCode" class="text-xs" />
+          <span class="font-bold text-sm truncate leading-tight">{{ name ?? "..." }}</span>
+        </div>
       </div>
-      <span v-if="ready" class="text-green-500 shrink-0 text-base leading-none">✔</span>
+      <span v-if="ready" class="text-green-500 shrink-0 text-base leading-none pr-2">✔</span>
     </div>
 
-    <div class="px-3 pt-2.5 pb-3 flex flex-col gap-2.5">
+    <div class="px-1 pt-2.5 pb-3 flex flex-col gap-2.5">
       <!-- HP bar with number overlaid -->
       <div class="flex items-center gap-2">
         <span class="text-xs shrink-0 leading-none">❤️</span>
@@ -65,11 +70,18 @@
         </div>
       </div>
 
-      <!-- Stats row (icons only, left-aligned) -->
-      <div v-if="stats" class="flex items-center gap-3 tabular-nums">
-        <span class="text-xs font-mono font-semibold">⚔️ {{ stats.attack }}</span>
-        <span class="text-xs font-mono font-semibold">✨ {{ stats.magic }}</span>
-        <span class="text-xs font-mono font-semibold">🛡️ {{ stats.defense }}</span>
+      <!-- Stats row -->
+      <div v-if="stats" class="flex items-start -ml-1.5">
+        <span class="badge badge-xs badge-ghost font-mono font-semibold">
+          ⚔️ {{ stats.attack }}
+        </span>
+
+        <span class="badge badge-xs badge-ghost font-mono font-semibold">
+          ✨ {{ stats.magic }}
+        </span>
+        <span class="badge badge-xs badge-ghost font-mono font-semibold">
+          🛡️ {{ stats.defense }}
+        </span>
       </div>
       <div v-else class="text-xs opacity-30 py-0.5">Chờ...</div>
     </div>

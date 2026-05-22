@@ -53,12 +53,24 @@
 
 <template>
   <!-- Submitted state -->
-  <div v-if="submitted" class="flex items-center justify-center gap-2 py-3 opacity-60">
+  <div
+    v-if="submitted"
+    v-motion
+    :initial="{ opacity: 0 }"
+    :enter="{ opacity: 0.6, transition: { duration: 300 } }"
+    class="flex items-center justify-center gap-2 py-3"
+  >
     <span class="loading loading-dots loading-sm"></span>
     <span class="text-sm">Đã gửi, chờ đối thủ...</span>
   </div>
 
-  <div v-else class="flex flex-col gap-3">
+  <div
+    v-else
+    v-motion
+    :initial="{ opacity: 0, y: 16 }"
+    :enter="{ opacity: 1, y: 0, transition: { duration: 350 } }"
+    class="flex flex-col gap-3"
+  >
     <!-- Skill palette -->
     <div class="flex gap-2 justify-center">
       <button
@@ -81,6 +93,8 @@
       :animation="180"
       filter=".slot-empty"
       :prevent-on-filter="false"
+      :delay="150"
+      :delay-on-touch-only="true"
       @end="onSortEnd"
     >
       <div

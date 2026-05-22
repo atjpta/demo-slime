@@ -24,14 +24,21 @@
   const showCreateModal = ref(false);
   const createdRoomCode = ref("");
   const createLoading = ref(false);
+  let createCancelled = false;
 
   const createMatch = async () => {
     createLoading.value = true;
+    createCancelled = false;
     try {
       const room = await battleRoom.create(playerStore.playerToken);
       createdRoomCode.value = room.roomId;
       battleStore.rooms.battle = room;
       showCreateModal.value = true;
+      battleRoom.onBattleStart(room, () => {
+        if (createCancelled) return;
+        showCreateModal.value = false;
+        router.push("/battle");
+      });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -44,14 +51,10 @@
     toast.success("Đã sao chép mã phòng");
   };
 
-  const enterCreatedRoom = () => {
-    showCreateModal.value = false;
-    router.push("/battle");
-  };
-
   const cancelCreate = async () => {
-    showCreateModal.value = false;
     await battleRoom.leave(battleStore.rooms.battle);
+    createCancelled = true;
+    showCreateModal.value = false;
     battleStore.rooms.battle = null;
     createdRoomCode.value = "";
   };
@@ -73,6 +76,15 @@
       toast.error("Không tìm thấy phòng hoặc phòng đã đầy");
     } finally {
       joinLoading.value = false;
+    }
+  };
+
+  const cancelJoin = async () => {
+    showJoinModal.value = false;
+    joinCode.value = "";
+    if (battleStore.rooms.battle) {
+      await battleRoom.leave(battleStore.rooms.battle);
+      battleStore.rooms.battle = null;
     }
   };
 
@@ -115,7 +127,7 @@
             router.push("/lobby");
           },
         },
-        rankMode,
+        rankMode
       );
     } catch (e: any) {
       toast.error(e.message);
@@ -138,7 +150,12 @@
 <template>
   <div class="container mx-auto max-w-lg p-6 flex flex-col items-center gap-6 mt-8">
     <!-- Player info -->
-    <div class="card bg-base-100 shadow-md w-full">
+    <div
+      v-motion
+      :initial="{ opacity: 0, y: -20 }"
+      :enter="{ opacity: 1, y: 0, transition: { duration: 400 } }"
+      class="card bg-base-100 shadow-md w-full"
+    >
       <div class="card-body items-center text-center gap-2 py-5">
         <div class="text-4xl">🟢</div>
         <div class="text-xl font-bold">{{ playerStore.myPlayer?.name ?? "..." }}</div>
@@ -150,7 +167,12 @@
     <!-- Mode sections -->
     <div class="grid grid-cols-2 gap-4 w-full">
       <!-- Rank -->
-      <div class="card bg-base-100 shadow-md">
+      <div
+        v-motion
+        :initial="{ opacity: 0, x: -24 }"
+        :enter="{ opacity: 1, x: 0, transition: { delay: 100, duration: 400 } }"
+        class="card bg-base-100 shadow-md"
+      >
         <div class="card-body items-center text-center gap-3 py-5 px-4">
           <div class="flex items-center gap-1 w-full justify-center">
             <div class="text-sm font-bold uppercase tracking-widest opacity-60">Xếp hạng</div>
@@ -158,12 +180,16 @@
               class="btn btn-xs btn-circle btn-ghost opacity-50 hover:opacity-100"
               title="Bảng xếp hạng"
               @click="showLeaderboard = true"
-            >🏆</button>
+            >
+              🏆
+            </button>
             <button
               class="btn btn-xs btn-circle btn-ghost opacity-50 hover:opacity-100"
               title="Xem cấu hình rank"
               @click="showRankConfig = true"
-            >ℹ️</button>
+            >
+              ℹ️
+            </button>
           </div>
           <span v-if="rankLoading" class="loading loading-spinner loading-sm opacity-50"></span>
           <template v-else>
@@ -187,7 +213,12 @@
       </div>
 
       <!-- Casual -->
-      <div class="card bg-base-100 shadow-md">
+      <div
+        v-motion
+        :initial="{ opacity: 0, x: 24 }"
+        :enter="{ opacity: 1, x: 0, transition: { delay: 100, duration: 400 } }"
+        class="card bg-base-100 shadow-md"
+      >
         <div class="card-body items-center text-center gap-3 py-5 px-4">
           <div class="text-sm font-bold uppercase tracking-widest opacity-60">Thường</div>
           <div class="text-3xl">🎮</div>
@@ -199,7 +230,11 @@
             >
               🔀 Ghép nhanh
             </button>
-            <button class="btn btn-outline btn-sm w-full" :disabled="createLoading" @click="createMatch">
+            <button
+              class="btn btn-outline btn-sm w-full"
+              :disabled="createLoading"
+              @click="createMatch"
+            >
               <span v-if="createLoading" class="loading loading-spinner loading-xs"></span>
               🏟️ Tạo phòng
             </button>
@@ -238,10 +273,11 @@
           </span>
           <button class="btn btn-sm btn-ghost" @click="copyCode">📋</button>
         </div>
-        <div class="flex gap-2 mt-1">
-          <button class="btn btn-ghost flex-1" @click="cancelCreate">Hủy</button>
-          <button class="btn btn-primary flex-1" @click="enterCreatedRoom">Vào phòng</button>
+        <div class="flex items-center justify-center gap-2 py-1 opacity-60">
+          <span class="loading loading-dots loading-sm"></span>
+          <span class="text-sm">Đang chờ người chơi...</span>
         </div>
+        <button class="btn btn-ghost w-full" @click="cancelCreate">Hủy</button>
       </div>
     </div>
   </div>
@@ -259,15 +295,7 @@
           @keyup.enter="joinByCode"
         />
         <div class="flex gap-2">
-          <button
-            class="btn btn-ghost flex-1"
-            @click="
-              showJoinModal = false;
-              joinCode = '';
-            "
-          >
-            Hủy
-          </button>
+          <button class="btn btn-ghost flex-1" @click="cancelJoin">Hủy</button>
           <button
             class="btn btn-primary flex-1"
             :disabled="joinLoading || !joinCode.trim()"

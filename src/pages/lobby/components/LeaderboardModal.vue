@@ -58,26 +58,33 @@
               {{ idx + 1 }}
             </span>
             <div class="flex-1 min-w-0 flex items-center gap-1.5">
+              <TierBadge
+                class="text-xs"
+                :is-show-label="false"
+                :code="item.tier?.code as TierCode"
+              />
               <span class="font-semibold text-sm truncate">{{ item.player.name }}</span>
-              <TierBadge v-if="item.tier?.code" :code="item.tier.code as TierCode" always-label class="text-xs" />
             </div>
             <span class="text-sm font-mono font-bold tabular-nums shrink-0">{{ item.point }}</span>
           </div>
         </div>
 
         <!-- My position row -->
-        <div class="border-t-2 border-primary/40 bg-primary/5 px-5 py-3 shrink-0 flex items-center gap-3">
+        <div
+          class="border-t-2 border-primary/40 bg-primary/5 px-5 py-3 shrink-0 flex items-center gap-3"
+        >
           <span class="w-6 text-center font-bold tabular-nums text-primary shrink-0">
             {{ myPosition ? (myPosition.rank > 100 ? "100+" : myPosition.rank) : "?" }}
           </span>
           <div class="flex-1 min-w-0 flex items-center gap-1.5">
-            <span class="font-semibold text-sm truncate text-primary">{{ playerStore.myPlayer?.name }}</span>
             <TierBadge
-              v-if="myPosition?.profile.tier?.code"
-              :code="myPosition.profile.tier.code as TierCode"
-              always-label
+              :is-show-label="false"
+              :code="myPosition?.profile.tier?.code as TierCode"
               class="text-xs"
             />
+            <span class="font-semibold text-sm truncate text-primary">
+              {{ playerStore.myPlayer?.name }}
+            </span>
           </div>
           <span class="text-sm font-mono font-bold tabular-nums shrink-0 text-primary">
             {{ myPosition?.profile.point ?? "?" }}

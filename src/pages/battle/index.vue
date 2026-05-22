@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
+  import { ref, computed, watch, onMounted, onUnmounted } from "vue";
   import { useRouter } from "vue-router";
   import { toast } from "vue-sonner";
   import { usePlayerStore, useBattleStore } from "@/stores";
@@ -7,6 +7,7 @@
   import type { BattleHandlers, RankUpdateData } from "@/client";
   import { Phase, TURNS_PER_WAVE } from "@/constants";
   import PlayerCard from "./components/PlayerCard.vue";
+  import SlimeArena from "./components/SlimeArena.vue";
   import ActionPicker from "./components/ActionPicker.vue";
   import ExecutingPanel from "./components/ExecutingPanel.vue";
   import TurnLogList from "./components/TurnLogList.vue";
@@ -30,12 +31,11 @@
   );
 
   const getStats = (playerId: string) => {
-    // 2. Sau reconnect: shownLogs rỗng nhưng logs có dữ liệu wave cũ
-    const latestLog = battleStore.logs.at(-1);
-    if (latestLog) {
-      return latestLog.players.get(playerId)?.stats ?? null;
-    }
-    // 3. Đầu trận hoặc chưa có log: dùng stats từ battle_init
+    const latestShown = battleStore.shownLogs.find((l: any) => l.wave === battleStore.wave);
+    if (latestShown) return latestShown.players.get(playerId)?.stats ?? null;
+    // Only use logs from previous waves — avoids showing unrevealed current-wave stats
+    const prevLog = [...battleStore.logs].reverse().find((l: any) => l.wave < battleStore.wave);
+    if (prevLog) return prevLog.players.get(playerId)?.stats ?? null;
     return battleStore.initPlayers[playerId]?.stats ?? null;
   };
 
@@ -52,6 +52,7 @@
 
   // ─── Log reveal ───────────────────────────────────────────────────────────
   const logQueue = ref<any[]>([]);
+  const executingDone = ref(false);
   let revealTimer: ReturnType<typeof setInterval> | null = null;
 
   const startRevealTimer = () => {
@@ -59,9 +60,17 @@
     revealTimer = setInterval(() => {
       if (logQueue.value.length > 0) {
         battleStore.shownLogs.unshift(logQueue.value.shift());
-      } else {
+      }
+      const shown = battleStore.shownLogs.filter((l: any) => l.wave === battleStore.wave).length;
+      const total = waveLogs.value.length;
+      const allRevealed = shown > 0 && logQueue.value.length === 0 && shown >= total;
+      if (allRevealed) {
         clearInterval(revealTimer!);
         revealTimer = null;
+        setTimeout(() => {
+          executingDone.value = true;
+          battleStore.rooms.battle?.send("submit_executing_done");
+        }, 1000);
       }
     }, 1000);
   };
@@ -78,6 +87,7 @@
       const incoming = waveLogs.value.slice(alreadyHandled, newLen);
       if (incoming.length > 0) {
         logQueue.value.push(...incoming);
+        // Fallback: khởi động timer nếu chưa chạy (ví dụ reconnect)
         startRevealTimer();
       }
     }
@@ -91,20 +101,25 @@
         revealTimer = null;
       }
       logQueue.value = [];
+      executingDone.value = false;
     }
   );
 
   watch(
-    () => battleStore.phase,
-    (phase) => {
+    () => [battleStore.phase, battleStore.winner] as const,
+    ([phase, winner]) => {
       if (phase === Phase.SELECTING) {
         actionsSubmitted.value = false;
         selectedActions.value = Array(TURNS_PER_WAVE).fill(0);
       }
+      if (phase === Phase.EXECUTING) {
+        startRevealTimer();
+      }
       if (phase === Phase.ENDED) {
-        if (battleStore.winner === "draw") result.value = "draw";
-        else if (battleStore.winner === playerStore.myPlayerId) result.value = "win";
-        else result.value = "lose";
+        battleStore.isReconnecting = false;
+        if (winner === playerStore.myPlayerId) result.value = "win";
+        else if (winner) result.value = "lose";
+        else result.value = "draw";
       }
     }
   );
@@ -137,11 +152,11 @@
     onInitPlayersChange: (pid, data) => {
       battleStore.initPlayers[pid] = data;
     },
-    onLogAdd: (log) => {
-      battleStore.logs.push(log);
+    onLogAdd: (logs) => {
+      battleStore.logs.push(...logs);
     },
     onLogAddReconnect: async (logRaws) => {
-      const [first, ...logs] = logRaws;
+      const [, ...logs] = logRaws;
       battleStore.logs = logs;
     },
     onRankUpdate: (data) => {
@@ -170,7 +185,8 @@
   }
 
   async function handleLeave(code: number) {
-    const isIntentional = code === 1000 || battleStore.phase === Phase.ENDED || result.value !== null;
+    const isIntentional =
+      code === 1000 || battleStore.phase === Phase.ENDED || result.value !== null;
     battleStore.rooms.battle = null;
 
     if (isIntentional || battleStore.isReconnecting) return;
@@ -181,17 +197,27 @@
     const token = battleStore.loadReconnectToken();
     if (!token) {
       battleStore.isReconnecting = false;
-      toast.error("Không thể kết nối lại: thiếu token");
+      // toast.error("Không thể kết nối lại: thiếu token");
       router.push("/lobby");
       return;
     }
 
     for (let attempt = 0; attempt < MAX_RECONNECT_ATTEMPTS; attempt++) {
+      if (result.value !== null || battleStore.phase === Phase.ENDED || code === 4000) {
+        battleStore.isReconnecting = false;
+        return;
+      }
+
       battleStore.reconnectAttempts = attempt + 1;
 
       if (attempt > 0) {
         const delay = Math.min(1000 * 2 ** (attempt - 1), 16000);
         await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      if (result.value !== null || battleStore.phase === Phase.ENDED) {
+        battleStore.isReconnecting = false;
+        return;
       }
 
       try {
@@ -288,7 +314,9 @@
         :name="playerStore.myPlayer?.name"
         :stats="getStats(playerStore.myPlayerId)"
         :init-hp="battleStore.initPlayers[playerStore.myPlayerId]?.stats?.hp"
-        :ready="battleStore.phase === Phase.SELECTING && battleStore.playerReady[playerStore.myPlayerId]"
+        :ready="
+          battleStore.phase === Phase.SELECTING && battleStore.playerReady[playerStore.myPlayerId]
+        "
         :tier-code="battleStore.initPlayers[playerStore.myPlayerId]?.tierCode"
       />
       <PlayerCard
@@ -297,40 +325,66 @@
         :name="opponentId ? battleStore.initPlayers[opponentId]?.name : undefined"
         :stats="opponentId ? getStats(opponentId) : null"
         :init-hp="opponentId ? battleStore.initPlayers[opponentId]?.stats?.hp : null"
-        :ready="battleStore.phase === Phase.SELECTING && !!opponentId && battleStore.playerReady[opponentId]"
+        :ready="
+          battleStore.phase === Phase.SELECTING &&
+          !!opponentId &&
+          battleStore.playerReady[opponentId]
+        "
         :tier-code="opponentId ? battleStore.initPlayers[opponentId]?.tierCode : null"
       />
     </div>
 
-    <div v-if="battleStore.phase === Phase.SELECTING" class="flex flex-col gap-3">
-      <div class="grid grid-cols-3 items-center">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold opacity-60">Chọn hành động</span>
-          <button
-            class="btn btn-xs btn-circle btn-info animate-pulse shadow-md shadow-info/50 font-bold text-info-content"
-            title="Hướng dẫn chiến đấu"
-            @click="showGuide = true"
-          >?</button>
-        </div>
-        <span class="text-sm font-bold text-center opacity-50">Wave {{ battleStore.wave }}</span>
-        <div class="flex items-baseline gap-1 justify-end">
-          <span
-            class="font-mono font-extrabold text-xl tabular-nums"
-            :class="battleStore.timeLeft <= 5 ? 'text-error' : 'text-primary'"
-            >{{ battleStore.timeLeft }}</span
-          >
-          <span class="text-xs opacity-40">s</span>
-        </div>
-      </div>
-      <ActionPicker
-        v-model="selectedActions"
-        :skills="mySkills"
-        :submitted="actionsSubmitted"
-        @submit="submitActions"
-      />
-    </div>
+    <!-- Slimes hiển thị ở cả SELECTING và EXECUTING -->
+    <SlimeArena :opponent-id="opponentId" />
 
-    <ExecutingPanel v-if="battleStore.phase === Phase.EXECUTING" :opponent-id="opponentId" />
+    <!-- Nội dung theo phase, chuyển đổi mượt mà -->
+    <Transition name="phase-fade" mode="out-in">
+      <div v-if="battleStore.phase === Phase.SELECTING" key="selecting" class="flex flex-col gap-3">
+        <div class="grid grid-cols-3 items-center">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold opacity-60">Chọn hành động</span>
+            <button
+              class="btn btn-xs btn-circle btn-info animate-pulse shadow-md shadow-info/50 font-bold text-info-content"
+              title="Hướng dẫn chiến đấu"
+              @click="showGuide = true"
+            >
+              ?
+            </button>
+          </div>
+          <span class="badge badge-neutral font-bold mx-auto">Wave {{ battleStore.wave }}</span>
+          <div class="flex items-baseline gap-1 justify-end">
+            <span
+              class="countdown font-mono font-extrabold text-xl"
+              :class="battleStore.timeLeft <= 5 ? 'text-error' : 'text-primary'"
+            >
+              <span :style="`--value:${battleStore.timeLeft};`"></span>
+            </span>
+            <span class="text-xs opacity-40">s</span>
+          </div>
+        </div>
+        <ActionPicker
+          v-model="selectedActions"
+          :skills="mySkills"
+          :submitted="actionsSubmitted"
+          @submit="submitActions"
+        />
+      </div>
+
+      <div
+        v-else-if="battleStore.phase === Phase.EXECUTING && executingDone"
+        key="waiting-next"
+        class="flex items-center justify-center gap-2 py-3 opacity-50"
+      >
+        <span class="loading loading-dots loading-sm"></span>
+        <span class="text-sm">Đang chờ người chơi...</span>
+      </div>
+
+      <ExecutingPanel
+        v-else-if="battleStore.phase === Phase.EXECUTING"
+        key="executing"
+        :opponent-id="opponentId"
+      />
+    </Transition>
 
     <TurnLogList :opponent-id="opponentId" />
   </div>
@@ -339,6 +393,32 @@
     <span class="loading loading-spinner loading-lg"></span>
   </div>
 
-  <BattleResultModal v-if="result" :result="result" :rank-update="rankUpdate" @confirm="confirmResult" />
+  <BattleResultModal
+    v-if="result"
+    :result="result"
+    :rank-update="rankUpdate"
+    @confirm="confirmResult"
+  />
   <BattleGuideModal v-if="showGuide" @close="showGuide = false" />
 </template>
+
+<style scoped>
+  .phase-fade-enter-active {
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+  .phase-fade-leave-active {
+    transition:
+      opacity 0.15s ease,
+      transform 0.15s ease;
+  }
+  .phase-fade-enter-from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  .phase-fade-leave-to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+</style>

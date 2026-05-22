@@ -62,7 +62,7 @@
             :key="tier.code"
             class="flex items-center justify-between py-2.5"
           >
-            <TierBadge :code="tier.code as TierCode" always-label />
+            <TierBadge :is-show-label="true" :code="tier.code as TierCode" always-label />
             <span class="text-sm opacity-50">≥ {{ tier.minPoint }} điểm</span>
           </div>
         </div>
