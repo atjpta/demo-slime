@@ -18,7 +18,7 @@
     }
   });
 
-  const normalLadder = () => config.value?.ladders.find((l) => l.rankMode === "normal") ?? null;
+  const normalLadder = () => config.value?.ladders.find((l) => l.rankMode === "unlimit") ?? null;
 </script>
 
 <template>

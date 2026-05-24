@@ -2,15 +2,14 @@
   import { ref, computed, watch, onMounted } from "vue";
   import { useRouter } from "vue-router";
   import { toast } from "vue-sonner";
-  import { useAuthStore, usePlayerStore } from "@/stores";
+  import { usePlayerStore } from "@/stores";
   import { battleLogService } from "@/client";
   import type { BattleLogItem } from "@/client";
 
   const router = useRouter();
-  const authStore = useAuthStore();
   const playerStore = usePlayerStore();
 
-  type FilterMode = "all" | "normal" | "casual";
+  type FilterMode = "all" | "normal" | "unlimit" | "balance";
 
   const items = ref<BattleLogItem[]>([]);
   const total = ref(0);
@@ -22,11 +21,7 @@
 
   const totalPages = computed(() => Math.ceil(total.value / limit));
 
-  const displayItems = computed(() =>
-    filterMode.value === "casual"
-      ? items.value.filter((i) => !i.rankMode)
-      : items.value
-  );
+  const displayItems = computed(() => items.value);
 
   const endReasonLabel: Record<string, string> = {
     hp_depleted: "Hết HP",
@@ -40,10 +35,10 @@
   const load = async () => {
     loading.value = true;
     try {
-      battleLogService.setToken(authStore.userToken);
+      battleLogService.setToken(playerStore.playerToken);
       const res = await battleLogService.getList({
         playerId: onlyMine.value ? playerStore.myPlayerId : undefined,
-        rankMode: filterMode.value === "normal" ? "normal" : undefined,
+        rankMode: filterMode.value !== "all" ? filterMode.value : undefined,
         page: page.value,
         limit,
       });
@@ -91,12 +86,19 @@
 
     <div class="flex gap-1">
       <button
-        v-for="f in ([['all','Tất cả'],['normal','Rank'],['casual','Thường']] as const)"
+        v-for="f in [
+          ['all', 'Tất cả'],
+          ['normal', 'Thường'],
+          ['unlimit', 'Unlimit'],
+          ['balance', 'Balance'],
+        ] as const"
         :key="f[0]"
         class="btn btn-sm flex-1"
         :class="filterMode === f[0] ? 'btn-primary' : 'btn-ghost opacity-60'"
         @click="changeFilter(f[0])"
-      >{{ f[1] }}</button>
+      >
+        {{ f[1] }}
+      </button>
     </div>
 
     <!-- Loading -->
@@ -105,7 +107,9 @@
     </div>
 
     <!-- Empty -->
-    <div v-else-if="!displayItems.length" class="text-center opacity-40 py-12">Chưa có trận đấu nào</div>
+    <div v-else-if="!displayItems.length" class="text-center opacity-40 py-12">
+      Chưa có trận đấu nào
+    </div>
 
     <!-- List -->
     <div v-else class="flex flex-col gap-2">
@@ -137,8 +141,15 @@
             <div class="text-xs opacity-40 mt-0.5 flex items-center gap-1.5">
               <span
                 class="badge badge-xs"
-                :class="item.rankMode ? 'badge-warning' : 'badge-ghost'"
-              >{{ item.rankMode ? 'Rank' : 'Thường' }}</span>
+                :class="item.rankMode && item.rankMode !== 'normal' ? 'badge-warning' : 'badge-ghost'"
+                >{{
+                  item.rankMode === "unlimit"
+                    ? "Unlimit"
+                    : item.rankMode === "balance"
+                      ? "Balance"
+                      : "Thường"
+                }}</span
+              >
               {{ endReasonLabel[item.endReason] ?? item.endReason }} ·
               {{ formatDate(item.createdAt) }}
             </div>

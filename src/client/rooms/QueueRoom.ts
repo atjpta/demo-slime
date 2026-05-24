@@ -10,7 +10,7 @@ export class QueueRoom extends BaseClient {
   async join(
     playerToken: string,
     handlers: QueueHandlers,
-    rankMode?: "normal" | "balance",
+    rankMode?: "normal" | "unlimit" | "balance",
   ): Promise<Room> {
     this.setToken(playerToken);
 

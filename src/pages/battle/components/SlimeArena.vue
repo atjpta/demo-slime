@@ -1,7 +1,7 @@
 <script setup lang="ts">
   import { computed } from "vue";
   import { useBattleStore, usePlayerStore } from "@/stores";
-  import { SKILL_META, SKILL_COUNTER, TURNS_PER_WAVE } from "@/constants";
+  import { SKILL_META, SKILL_COUNTER, ITEM_META, TURNS_PER_WAVE } from "@/constants";
   import slimeGif from "@/assets/slime/idle_right.gif";
 
   const props = defineProps<{ opponentId: string | null }>();
@@ -21,15 +21,19 @@
   };
 
   // ─── Turn tracking ────────────────────────────────────────────────────────
+  // Đếm tất cả log đã reveal (kể cả turn 0) — dùng làm animation key
   const currentWaveShown = computed(
     () => battleStore.shownLogs.filter((l: any) => l.wave === battleStore.wave).length
   );
 
-  // clashIdx = turn vừa được reveal (không phải turn tiếp theo)
-  // → clash icons và counter/damage hiện cùng lúc
+  // Chỉ đếm combat turns (turn > 0) — dùng cho clashIdx slot highlighting
+  const combatWaveShown = computed(
+    () => battleStore.shownLogs.filter((l: any) => l.wave === battleStore.wave && l.turn > 0).length
+  );
+
   const clashIdx = computed(() => {
-    if (currentWaveShown.value === 0) return null;
-    const idx = currentWaveShown.value - 1;
+    if (combatWaveShown.value === 0) return null;
+    const idx = combatWaveShown.value - 1;
     return idx < TURNS_PER_WAVE ? idx : null;
   });
 
@@ -65,7 +69,29 @@
   );
 
   const totalDamage = (effects: any[]) =>
-    effects?.reduce((sum: number, e: any) => sum + (e.value ?? 0), 0) ?? 0;
+    (effects ?? [])
+      .filter((e: any) => e.typeEffect !== "heal")
+      .reduce((sum: number, e: any) => sum + (e.value ?? 0), 0);
+
+  const totalHeal = (effects: any[]) =>
+    (effects ?? [])
+      .filter((e: any) => e.typeEffect === "heal")
+      .reduce((sum: number, e: any) => sum + (e.value ?? 0), 0);
+
+  const isItemTurn = computed(() => lastShownLog.value?.turn === 0);
+
+  const getItemMeta = (code: string | undefined) => {
+    if (!code) return null;
+    return ITEM_META[code.replace(/-/g, "_")] ?? null;
+  };
+
+  const myItemUsed = computed(() =>
+    isItemTurn.value ? getItemMeta((lastShownLog.value?.players.get(playerStore.myPlayerId) as any)?.itemUsed?.code) : null
+  );
+
+  const oppItemUsed = computed(() =>
+    isItemTurn.value && props.opponentId ? getItemMeta((lastShownLog.value?.players.get(props.opponentId) as any)?.itemUsed?.code) : null
+  );
 
   const myDmg = computed(() => {
     if (!lastShownLog.value) return 0;
@@ -75,6 +101,16 @@
   const oppDmg = computed(() => {
     if (!lastShownLog.value || !props.opponentId) return 0;
     return totalDamage(lastShownLog.value.players.get(props.opponentId)?.damageReceive ?? []);
+  });
+
+  const myHeal = computed(() => {
+    if (!lastShownLog.value) return 0;
+    return totalHeal(lastShownLog.value.players.get(playerStore.myPlayerId)?.damageReceive ?? []);
+  });
+
+  const oppHeal = computed(() => {
+    if (!lastShownLog.value || !props.opponentId) return 0;
+    return totalHeal(lastShownLog.value.players.get(props.opponentId)?.damageReceive ?? []);
   });
 
   const counter = computed(() => {
@@ -125,7 +161,26 @@
         style="height: 40px; align-items: flex-end"
       >
         <Transition name="bubble" mode="out-in">
-          <div v-if="counter?.win" :key="clashKey" class="flex flex-col items-center">
+          <div v-if="myItemUsed" :key="`item-${clashKey}`" class="flex flex-col items-center">
+            <div
+              class="px-4 py-1.5 whitespace-nowrap"
+              :class="myHeal > 0 ? 'bg-success text-success-content' : 'bg-warning text-warning-content'"
+              :style="myHeal > 0
+                ? 'transform:skewX(-14deg);box-shadow:0 3px 12px -2px oklch(var(--su)/0.6)'
+                : 'transform:skewX(-14deg);box-shadow:0 3px 12px -2px oklch(var(--wa)/0.6)'"
+            >
+              <span
+                class="block text-[11px] font-black uppercase tracking-widest leading-none"
+                style="transform: skewX(14deg); text-shadow: 1px 1px 0 rgba(0,0,0,0.25)"
+                >{{ myItemUsed.icon }} {{ myItemUsed.label }}!</span
+              >
+            </div>
+            <div
+              class="w-2.5 h-2.5 rotate-45 -mt-1.5"
+              :class="myHeal > 0 ? 'bg-success' : 'bg-warning'"
+            ></div>
+          </div>
+          <div v-else-if="counter?.win" :key="clashKey" class="flex flex-col items-center">
             <div
               class="px-4 py-1.5 bg-success text-success-content whitespace-nowrap"
               style="transform: skewX(-14deg); box-shadow: 0 3px 12px -2px oklch(var(--su) / 0.6)"
@@ -141,13 +196,19 @@
         </Transition>
       </div>
 
-      <!-- Slime + damage float -->
+      <!-- Slime + damage/heal float -->
       <div class="relative">
         <span
           v-if="myDmg > 0"
-          :key="clashKey"
+          :key="`dmg-${clashKey}`"
           class="dmg-float absolute top-1/2 left-1/2 text-error font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
           >-{{ myDmg }}</span
+        >
+        <span
+          v-if="myHeal > 0"
+          :key="`heal-${clashKey}`"
+          class="heal-float absolute top-1/2 left-1/2 text-success font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
+          >+{{ myHeal }}</span
         >
         <img :src="slimeGif" class="h-24 w-auto object-contain" />
       </div>
@@ -197,7 +258,26 @@
         style="height: 40px; align-items: flex-end"
       >
         <Transition name="bubble" mode="out-in">
-          <div v-if="oppCounter?.win" :key="clashKey" class="flex flex-col items-center">
+          <div v-if="oppItemUsed" :key="`opp-item-${clashKey}`" class="flex flex-col items-center">
+            <div
+              class="px-4 py-1.5 whitespace-nowrap"
+              :class="oppHeal > 0 ? 'bg-success text-success-content' : 'bg-warning text-warning-content'"
+              :style="oppHeal > 0
+                ? 'transform:skewX(14deg);box-shadow:0 3px 12px -2px oklch(var(--su)/0.6)'
+                : 'transform:skewX(14deg);box-shadow:0 3px 12px -2px oklch(var(--wa)/0.6)'"
+            >
+              <span
+                class="block text-[11px] font-black uppercase tracking-widest leading-none"
+                style="transform: skewX(-14deg); text-shadow: 1px 1px 0 rgba(0,0,0,0.25)"
+                >{{ oppItemUsed.icon }} {{ oppItemUsed.label }}!</span
+              >
+            </div>
+            <div
+              class="w-2.5 h-2.5 rotate-45 -mt-1.5"
+              :class="oppHeal > 0 ? 'bg-success' : 'bg-warning'"
+            ></div>
+          </div>
+          <div v-else-if="oppCounter?.win" :key="clashKey" class="flex flex-col items-center">
             <div
               class="px-4 py-1.5 bg-error text-error-content whitespace-nowrap"
               style="transform: skewX(14deg); box-shadow: 0 3px 12px -2px oklch(var(--er) / 0.6)"
@@ -213,13 +293,19 @@
         </Transition>
       </div>
 
-      <!-- Slime + damage float -->
+      <!-- Slime + damage/heal float -->
       <div class="relative">
         <span
           v-if="oppDmg > 0"
-          :key="clashKey"
+          :key="`opp-dmg-${clashKey}`"
           class="dmg-float absolute top-1/2 left-1/2 text-error font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
           >-{{ oppDmg }}</span
+        >
+        <span
+          v-if="oppHeal > 0"
+          :key="`opp-heal-${clashKey}`"
+          class="heal-float absolute top-1/2 left-1/2 text-success font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
+          >+{{ oppHeal }}</span
         >
         <img :src="slimeGif" class="h-24 w-auto object-contain -scale-x-100" />
       </div>
@@ -233,6 +319,30 @@
 <style scoped>
   .dmg-float {
     animation: dmg-float 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .heal-float {
+    animation: heal-float 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes heal-float {
+    0% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(0px) scale(0.75);
+    }
+    10% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-6px) scale(1.2);
+    }
+    20% {
+      transform: translateX(-50%) translateY(-10px) scale(1);
+    }
+    70% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-48px) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-72px) scale(0.95);
+    }
   }
   @keyframes dmg-float {
     0% {

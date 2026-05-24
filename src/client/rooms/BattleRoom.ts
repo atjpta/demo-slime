@@ -29,6 +29,8 @@ export type BattleHandlers = {
   onLogAdd: (logs: BattleTurnLogState[]) => void;
   onLogAddReconnect: (logs: BattleTurnLogState[]) => void;
   onRankUpdate: (data: RankUpdateData) => void;
+  onOfferedItemsChange: (playerId: string, items: { code: string; type: string }[]) => void;
+  onPlayerItemsChange: (playerId: string, items: { code: string; type: string }[]) => void;
   onLeave: (code: number) => void;
   onError: (code: number, msg: string) => void;
 };
@@ -52,6 +54,8 @@ function normalizeLog(raw: any): BattleTurnLogState {
       eff.value = e.value ?? 0;
       pl.damageReceive.push(eff);
     }
+    if (p.itemUsed) (pl as any).itemUsed = p.itemUsed;
+    if (p.actionsAffected) (pl as any).actionsAffected = p.actionsAffected;
     log.players.set(pid, pl);
   }
   return log;
@@ -68,23 +72,56 @@ export class BattleRoom extends BaseClient {
       (phase: string) => {
         // console.log(phase);
         handlers.onPhaseChange(phase);
+        if (phase === "selecting_item") {
+          state.players?.forEach((player: any, pid: string) => {
+            const offered = [...(player.offeredItems ?? [])].map((i: any) => ({ code: i.code, type: i.type }));
+            if (offered.length > 0) handlers.onOfferedItemsChange(pid, offered);
+            const items = [...(player.items ?? [])].map((i: any) => ({ code: i.code, type: i.type }));
+            handlers.onPlayerItemsChange(pid, items);
+          });
+        }
       },
       true
     );
+
     callbacks.listen("wave", (wave: number) => handlers.onWaveChange(wave), true);
     callbacks.listen("timeLeft", (timeLeft: number) => handlers.onTimeLeftChange(timeLeft), true);
     callbacks.listen("winner", (winner: string) => handlers.onWinnerChange(winner));
 
     callbacks.onAdd("players", (player: any, pid: string) => {
       handlers.onPlayersChange([...state.players.keys()]);
-      callbacks.listen(player, "ready", (ready: boolean) =>
-        handlers.onPlayerReadyChange(pid, ready)
-      );
+      callbacks.listen(player, "ready", (ready: boolean) => {
+        // console.log("ready", ready);
+        handlers.onPlayerReadyChange(pid, ready);
+      });
       callbacks.onAdd(player, "actions", () => {
         if (player.actions.length === TURNS_PER_WAVE) {
           handlers.onActionsChange(pid, [...player.actions]);
         }
       });
+      // Đọc ngay items hiện có (reconnect)
+      if (player.items?.length > 0) {
+        const items = [...player.items].map((i: any) => ({ code: i.code, type: i.type }));
+        handlers.onPlayerItemsChange(pid, items);
+      }
+      const syncPlayerItems = () => {
+        const items = [...(player.items ?? [])].map((i: any) => ({ code: i.code, type: i.type }));
+        handlers.onPlayerItemsChange(pid, items);
+      };
+      callbacks.onAdd(player, "items", syncPlayerItems);
+      callbacks.onChange(player, "items", syncPlayerItems);
+
+      // offeredItems: đọc ngay (reconnect) + lắng nghe thay đổi
+      if (player.offeredItems?.length > 0) {
+        const offered = [...player.offeredItems].map((i: any) => ({ code: i.code, type: i.type }));
+        handlers.onOfferedItemsChange(pid, offered);
+      }
+      const syncOfferedItems = () => {
+        const offered = [...(player.offeredItems ?? [])].map((i: any) => ({ code: i.code, type: i.type }));
+        handlers.onOfferedItemsChange(pid, offered);
+      };
+      callbacks.onAdd(player, "offeredItems", syncOfferedItems);
+      callbacks.onChange(player, "offeredItems", syncOfferedItems);
     });
 
     room.onMessage(

@@ -3,9 +3,9 @@
   import { useRouter } from "vue-router";
   import { toast } from "vue-sonner";
   import { usePlayerStore, useBattleStore } from "@/stores";
-  import { battleRoom, playerService } from "@/client";
+  import { battleRoom, playerService, battleItemService } from "@/client";
   import type { BattleHandlers, RankUpdateData } from "@/client";
-  import { Phase, TURNS_PER_WAVE } from "@/constants";
+  import { Phase, TURNS_PER_WAVE, ITEM_META, ITEM_TYPE_META } from "@/constants";
   import PlayerCard from "./components/PlayerCard.vue";
   import SlimeArena from "./components/SlimeArena.vue";
   import ActionPicker from "./components/ActionPicker.vue";
@@ -13,16 +13,25 @@
   import TurnLogList from "./components/TurnLogList.vue";
   import BattleResultModal from "./components/BattleResultModal.vue";
   import BattleGuideModal from "./components/BattleGuideModal.vue";
+  import SelectItemModal from "./components/SelectItemModal.vue";
+  import ItemsBar from "./components/ItemsBar.vue";
 
   const router = useRouter();
   const playerStore = usePlayerStore();
   const battleStore = useBattleStore();
 
   const selectedActions = ref<number[]>(Array(TURNS_PER_WAVE).fill(0));
-  const actionsSubmitted = ref(false);
+  const selectedItemSlot = ref<number | null>(null);
+  const selectedItemApplyTurn = ref<number | null>(null);
+  const detailItem = ref<{ code: string; type: string } | null>(null);
   const result = ref<"win" | "lose" | "draw" | null>(null);
   const rankUpdate = ref<RankUpdateData | null>(null);
   const showGuide = ref(false);
+
+  const getItemMeta = (code: string) =>
+    ITEM_META[code.replace(/-/g, "_")] ?? { icon: "❓", label: code, description: "" };
+  const getItemTypeMeta = (type: string) =>
+    ITEM_TYPE_META[type] ?? { label: type, badgeClass: "badge-ghost" };
 
   const mySkills = computed(() => battleStore.initPlayers[playerStore.myPlayerId]?.skills ?? []);
 
@@ -40,8 +49,17 @@
   };
 
   const submitActions = () => {
-    battleStore.rooms.battle?.send("submit_actions_battle", selectedActions.value);
-    actionsSubmitted.value = true;
+    const payload: Record<string, unknown> = { actions: selectedActions.value };
+    if (selectedItemSlot.value !== null) {
+      payload.itemIndex = selectedItemSlot.value;
+      if (selectedItemApplyTurn.value !== null)
+        payload.itemApplyIndex = selectedItemApplyTurn.value;
+    }
+    battleStore.rooms.battle?.send("submit_actions_battle", payload);
+  };
+
+  const submitSelectItem = (itemIndex: number, swapIndex?: number) => {
+    battleStore.rooms.battle?.send("submit_select_item", { itemIndex, swapIndex });
   };
 
   const confirmResult = () => {
@@ -52,14 +70,21 @@
 
   // ─── Log reveal ───────────────────────────────────────────────────────────
   const logQueue = ref<any[]>([]);
-  const executingDone = ref(false);
   let revealTimer: ReturnType<typeof setInterval> | null = null;
 
   const startRevealTimer = () => {
     if (revealTimer) return;
     revealTimer = setInterval(() => {
       if (logQueue.value.length > 0) {
-        battleStore.shownLogs.unshift(logQueue.value.shift());
+        const revealed = logQueue.value.shift();
+        battleStore.shownLogs.unshift(revealed);
+        if (revealed.turn === 0) {
+          for (const [pid, pLog] of revealed.players as Map<string, any>) {
+            if (pLog?.actionsAffected?.after) {
+              battleStore.playerActions[pid] = [...pLog.actionsAffected.after];
+            }
+          }
+        }
       }
       const shown = battleStore.shownLogs.filter((l: any) => l.wave === battleStore.wave).length;
       const total = waveLogs.value.length;
@@ -68,7 +93,6 @@
         clearInterval(revealTimer!);
         revealTimer = null;
         setTimeout(() => {
-          executingDone.value = true;
           battleStore.rooms.battle?.send("submit_executing_done");
         }, 1000);
       }
@@ -101,7 +125,6 @@
         revealTimer = null;
       }
       logQueue.value = [];
-      executingDone.value = false;
     }
   );
 
@@ -109,8 +132,9 @@
     () => [battleStore.phase, battleStore.winner] as const,
     ([phase, winner]) => {
       if (phase === Phase.SELECTING) {
-        actionsSubmitted.value = false;
         selectedActions.value = Array(TURNS_PER_WAVE).fill(0);
+        selectedItemSlot.value = null;
+        selectedItemApplyTurn.value = null;
       }
       if (phase === Phase.EXECUTING) {
         startRevealTimer();
@@ -158,6 +182,8 @@
     onLogAddReconnect: async (logRaws) => {
       const [, ...logs] = logRaws;
       battleStore.logs = logs;
+      // Hiện ngay log các wave cũ, không cần animate
+      battleStore.shownLogs = logs.filter((l: any) => l.wave < battleStore.wave);
     },
     onRankUpdate: (data) => {
       rankUpdate.value = data;
@@ -165,13 +191,20 @@
         playerStore.myRankProfile.point = data.newPoint;
       }
     },
+    onOfferedItemsChange: (pid, items) => {
+      if (pid === playerStore.myPlayerId) {
+        battleStore.offeredItems = items;
+      }
+    },
+    onPlayerItemsChange: (pid, items) => {
+      battleStore.playerItems[pid] = items;
+    },
     onLeave: (code) => handleLeave(code),
     onError: (_code, msg) => toast.error(`Battle: ${msg}`),
   };
 
   function resetLocalState() {
     logQueue.value = [];
-    actionsSubmitted.value = false;
     selectedActions.value = Array(TURNS_PER_WAVE).fill(0);
     if (revealTimer) {
       clearInterval(revealTimer);
@@ -243,6 +276,16 @@
   }
 
   onMounted(async () => {
+    if (battleStore?.battleItemsData?.length === 0 && playerStore.playerToken) {
+      battleItemService.setToken(playerStore.playerToken);
+      battleItemService
+        .getAll()
+        .then((items) => {
+          battleStore.battleItemsData = items;
+        })
+        .catch(() => {});
+    }
+
     // Restore player data nếu bị mất (ví dụ sau khi reload trang)
     if (!playerStore.myPlayer && playerStore.playerToken) {
       try {
@@ -337,6 +380,19 @@
     <!-- Slimes hiển thị ở cả SELECTING và EXECUTING -->
     <SlimeArena :opponent-id="opponentId" />
 
+    <!-- Túi đồ hai bên, luôn hiển thị khi có item -->
+    <ItemsBar
+      :opponent-id="opponentId"
+      :interactive="
+        battleStore.phase === Phase.SELECTING && !battleStore.playerReady[playerStore.myPlayerId]
+      "
+      :selected-slot="selectedItemSlot"
+      :selected-apply-turn="selectedItemApplyTurn"
+      @select="selectedItemSlot = $event"
+      @select-apply-turn="selectedItemApplyTurn = $event"
+      @detail="detailItem = $event"
+    />
+
     <!-- Nội dung theo phase, chuyển đổi mượt mà -->
     <Transition name="phase-fade" mode="out-in">
       <div v-if="battleStore.phase === Phase.SELECTING" key="selecting" class="flex flex-col gap-3">
@@ -365,13 +421,15 @@
         <ActionPicker
           v-model="selectedActions"
           :skills="mySkills"
-          :submitted="actionsSubmitted"
+          :submitted="!!battleStore.playerReady[playerStore.myPlayerId]"
           @submit="submitActions"
         />
       </div>
 
       <div
-        v-else-if="battleStore.phase === Phase.EXECUTING && executingDone"
+        v-else-if="
+          battleStore.phase === Phase.EXECUTING && !!battleStore.playerReady[playerStore.myPlayerId]
+        "
         key="waiting-next"
         class="flex items-center justify-center gap-2 py-3 opacity-50"
       >
@@ -391,6 +449,36 @@
 
   <div v-else class="flex justify-center items-center h-80">
     <span class="loading loading-spinner loading-lg"></span>
+  </div>
+
+  <SelectItemModal
+    v-if="battleStore.phase === Phase.SELECTING_ITEM"
+    :submitted="!!battleStore.playerReady[playerStore.myPlayerId]"
+    @submit="submitSelectItem"
+    @skip="battleStore.rooms.battle?.send('submit_select_item', {})"
+  />
+
+  <!-- Item detail modal -->
+  <div
+    v-if="detailItem"
+    class="modal modal-open items-end sm:items-center"
+    @click.self="detailItem = null"
+  >
+    <div class="modal-box rounded-none sm:rounded-none w-full max-w-xs flex flex-col gap-3 pb-6">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">{{ getItemMeta(detailItem.code).icon }}</span>
+          <span class="font-bold text-base">{{ getItemMeta(detailItem.code).label }}</span>
+        </div>
+        <span :class="['badge badge-sm', getItemTypeMeta(detailItem.type).badgeClass]">
+          {{ getItemTypeMeta(detailItem.type).label }}
+        </span>
+      </div>
+      <p class="text-sm opacity-70 leading-relaxed">
+        {{ getItemMeta(detailItem.code).description }}
+      </p>
+      <button class="btn btn-sm btn-ghost self-end" @click="detailItem = null">Đóng</button>
+    </div>
   </div>
 
   <BattleResultModal

@@ -2,7 +2,7 @@ import { BaseClient } from "../BaseClient";
 
 export interface RankProfile {
   _id: string;
-  rankMode: "normal" | "balance";
+  rankMode: "normal" | "unlimit" | "balance";
   point: number;
   tier: { code: string; minPoint: number } | null;
   totalMatch: number;
@@ -21,7 +21,7 @@ export interface RankTier {
 }
 
 export interface RankLadder {
-  rankMode: "normal" | "balance";
+  rankMode: "normal" | "unlimit" | "balance";
   name: string;
   ruleSet: { initialPoint: number; winPoint: number; losePoint: number };
 }
@@ -32,7 +32,7 @@ export interface RankConfig {
 }
 
 export class RankingService extends BaseClient {
-  async getMyRankProfile(rankMode: "normal" | "balance" = "normal"): Promise<RankProfile | null> {
+  async getMyRankProfile(rankMode: "normal" | "unlimit" | "balance" = "unlimit"): Promise<RankProfile | null> {
     const res = await this.http.get<{ data: RankProfile[] }>("/ranking/me", {
       query: { rankMode },
     });
@@ -46,7 +46,7 @@ export class RankingService extends BaseClient {
   }
 
   async getLeaderboard(
-    rankMode: "normal" | "balance" = "normal",
+    rankMode: "normal" | "unlimit" | "balance" = "unlimit",
     page = 1,
     limit = 100
   ): Promise<{
@@ -59,7 +59,7 @@ export class RankingService extends BaseClient {
     return this.unwrap(res);
   }
 
-  async getMyPosition(rankMode: "normal" | "balance" = "normal"): Promise<MyRankPosition | null> {
+  async getMyPosition(rankMode: "normal" | "unlimit" | "balance" = "unlimit"): Promise<MyRankPosition | null> {
     const res = await this.http.get<{ data: MyRankPosition }>("/ranking/me/position", {
       query: { rankMode },
     });

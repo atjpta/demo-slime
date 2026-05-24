@@ -1,5 +1,27 @@
 <script setup lang="ts">
+  import { ref, onMounted } from "vue";
+  import { battleItemService } from "@/client";
+  import type { BattleItemData } from "@/client";
+  import { ITEM_META, ITEM_TYPE_META } from "@/constants";
+
   const emit = defineEmits<{ close: [] }>();
+
+  const items = ref<BattleItemData[]>([]);
+  const itemsLoading = ref(true);
+
+  const getItemMeta = (code: string) =>
+    ITEM_META[code.replace(/-/g, "_")] ?? { icon: "❓", label: code, description: "" };
+  const getTypeMeta = (type: string) =>
+    ITEM_TYPE_META[type] ?? { label: type, badgeClass: "badge-ghost" };
+
+  onMounted(async () => {
+    try {
+      const all = await battleItemService.getAll();
+      items.value = all.filter((i) => i.status === "active");
+    } finally {
+      itemsLoading.value = false;
+    }
+  });
 </script>
 
 <template>
@@ -99,6 +121,43 @@
               <span class="opacity-40">4.</span> Điền đủ 5 ô rồi bấm <strong>Xác nhận</strong>.
             </li>
           </ul>
+        </section>
+
+        <!-- Items -->
+        <section class="flex flex-col gap-2">
+          <h4 class="font-semibold text-sm opacity-60 uppercase tracking-wide">Vật phẩm</h4>
+          <p class="text-sm leading-relaxed">
+            Trước mỗi wave chẵn (2, 4, 6,...) bạn được chọn <strong>1 trong 3</strong> vật phẩm ngẫu
+            nhiên. Túi đồ chứa tối đa <strong>3 vật phẩm</strong>. Vật phẩm được dùng tự động hoặc
+            theo lượt tùy loại.
+          </p>
+
+          <!-- Loading -->
+          <div v-if="itemsLoading" class="flex justify-center py-4">
+            <span class="loading loading-spinner loading-sm"></span>
+          </div>
+
+          <!-- Item list -->
+          <div v-else class="flex flex-col gap-2">
+            <div
+              v-for="item in items"
+              :key="item.code"
+              class="flex items-start gap-3 p-3 bg-base-200 border border-base-300"
+            >
+              <span class="text-2xl leading-none shrink-0">{{ getItemMeta(item.code).icon }}</span>
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="font-bold text-sm">{{ getItemMeta(item.code).label }}</span>
+                  <span :class="['badge badge-xs', getTypeMeta(item.type).badgeClass]">
+                    {{ getTypeMeta(item.type).label }}
+                  </span>
+                </div>
+                <span class="text-xs opacity-60 leading-snug">
+                  {{ getItemMeta(item.code).description || item.note }}
+                </span>
+              </div>
+            </div>
+          </div>
         </section>
 
         <button class="btn btn-primary rounded-none w-full mt-1" @click="emit('close')">

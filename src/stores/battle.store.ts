@@ -1,6 +1,7 @@
 import { ref, reactive, computed } from "vue";
 import { defineStore } from "pinia";
 import type { BattleTurnLogState } from "../schemas";
+import type { BattleItemData } from "../client/services/BattleItemService";
 
 export type InitPlayerData = {
   name: string;
@@ -20,6 +21,9 @@ export const useBattleStore = defineStore("battle", () => {
   const playerActions = ref<Record<string, number[]>>({});
   const playerReady = ref<Record<string, boolean>>({});
   const initPlayers = ref<Record<string, InitPlayerData>>({});
+  const offeredItems = ref<{ code: string; type: string }[]>([]);
+  const playerItems = ref<Record<string, { code: string; type: string }[]>>({});
+  const battleItemsData = ref<BattleItemData[]>([]);
   const logs = ref<BattleTurnLogState[]>([]);
   const shownLogs = ref<any[]>([]);
   const rooms = reactive<{ queue: any; battle: any }>({ queue: null, battle: null });
@@ -49,6 +53,8 @@ export const useBattleStore = defineStore("battle", () => {
     playerActions.value = {};
     playerReady.value = {};
     initPlayers.value = {};
+    offeredItems.value = [];
+    playerItems.value = {};
     logs.value = [];
     shownLogs.value = [];
   }
@@ -61,10 +67,27 @@ export const useBattleStore = defineStore("battle", () => {
   }
 
   return {
-    phase, wave, timeLeft, winner, playerIds, playerActions, playerReady, initPlayers,
-    logs, shownLogs, lastLog, rooms,
-    isReconnecting, reconnectAttempts,
-    saveReconnectToken, loadReconnectToken, clearReconnectToken,
-    resetGameData, reset,
+    phase,
+    wave,
+    timeLeft,
+    winner,
+    playerIds,
+    playerActions,
+    playerReady,
+    initPlayers,
+    offeredItems,
+    playerItems,
+    battleItemsData,
+    logs,
+    shownLogs,
+    lastLog,
+    rooms,
+    isReconnecting,
+    reconnectAttempts,
+    saveReconnectToken,
+    loadReconnectToken,
+    clearReconnectToken,
+    resetGameData,
+    reset,
   };
 });

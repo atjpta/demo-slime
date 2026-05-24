@@ -18,14 +18,13 @@
     return skill ? (SKILL_META[skill.code]?.icon ?? "❓") : "…";
   };
 
-  const currentWaveShown = computed(
-    () => battleStore.shownLogs.filter((l: any) => l.wave === battleStore.wave).length
+  const combatWaveShown = computed(
+    () => battleStore.shownLogs.filter((l: any) => l.wave === battleStore.wave && l.turn > 0).length
   );
 
-  // Đồng bộ với SlimeArena: active = turn vừa reveal (currentWaveShown - 1)
   const clashIdx = computed(() => {
-    if (currentWaveShown.value === 0) return null;
-    const idx = currentWaveShown.value - 1;
+    if (combatWaveShown.value === 0) return null;
+    const idx = combatWaveShown.value - 1;
     return idx < TURNS_PER_WAVE ? idx : null;
   });
 
@@ -45,7 +44,7 @@
 
   const getOpponentIcon = (i: number) => {
     if (!props.opponentId) return "🎴";
-    const waveLogs = [...battleStore.shownLogs].filter((l: any) => l.wave === battleStore.wave);
+    const waveLogs = [...battleStore.shownLogs].filter((l: any) => l.wave === battleStore.wave && l.turn > 0);
     if (i < waveLogs.length) {
       const log = [...waveLogs].reverse()[i];
       const action = log?.players?.get(props.opponentId)?.action ?? -1;

@@ -2,7 +2,7 @@
   import { computed } from "vue";
   import { TIER_META, type TierCode } from "@/constants";
 
-  const props = defineProps<{ code: TierCode; isShowLabel?: boolean }>();
+  const props = defineProps<{ code?: TierCode | null; isShowLabel?: boolean }>();
 
   const meta = computed(() => TIER_META[props.code]);
 </script>

@@ -2,24 +2,22 @@
   import { ref, computed, onMounted, onUnmounted } from "vue";
   import { useRoute, useRouter } from "vue-router";
   import { toast } from "vue-sonner";
-  import { useAuthStore, usePlayerStore } from "@/stores";
+  import { usePlayerStore } from "@/stores";
   import { battleLogService } from "@/client";
-  import type { BattleLogDetail, BattleLogTurn } from "@/client";
-  import { SKILL_META, SKILL_COUNTER } from "@/constants";
+  import type { BattleLogDetail, BattleLogTurn, PlayerItemWaveLogDetail } from "@/client";
+  import { SKILL_META, SKILL_COUNTER, ITEM_META, MAX_ITEM_SLOTS } from "@/constants";
   import slimeGif from "@/assets/slime/idle_right.gif";
   import TurnLogList from "@/components/TurnLogList.vue";
   import type { LogGroup } from "@/components/TurnLogList.vue";
 
   const route = useRoute();
   const router = useRouter();
-  const authStore = useAuthStore();
   const playerStore = usePlayerStore();
 
   const detail = ref<BattleLogDetail | null>(null);
   const loading = ref(true);
   const turnIdx = ref(0);
   let autoTimer: ReturnType<typeof setInterval> | null = null;
-  const isPlaying = ref(false);
 
   // Sorted flat list of all turns
   const sortedLogs = computed<BattleLogTurn[]>(() => {
@@ -36,9 +34,7 @@
   );
   // p1 = player khác với p0 (không dùng myPlayerId để tránh sai khi xem trận người khác)
   const p1 = computed(
-    () =>
-      detail.value?.players.find((p) => p.player._id !== p0.value?.player._id) ??
-      null
+    () => detail.value?.players.find((p) => p.player._id !== p0.value?.player._id) ?? null
   );
 
   const p0Id = computed(() => p0.value?.player._id ?? "");
@@ -46,6 +42,49 @@
 
   const p0InitHp = computed(() => p0.value?.stats.hp ?? 1);
   const p1InitHp = computed(() => p1.value?.stats.hp ?? 1);
+
+  const snapToEntry = (snap?: { code: string }) => {
+    if (!snap) return undefined;
+    const norm = snap.code.replace(/-/g, "_");
+    const meta = ITEM_META[norm];
+    return { code: snap.code, icon: meta?.icon ?? "❓", label: meta?.label ?? norm };
+  };
+
+  // Map wave -> { p0Log, p1Log } từ itemWaveLogs
+  const itemWaveMap = computed(() => {
+    const map = new Map<
+      number,
+      { p0Log?: PlayerItemWaveLogDetail; p1Log?: PlayerItemWaveLogDetail }
+    >();
+    if (!detail.value?.itemWaveLogs) return map;
+    for (const playerWave of detail.value?.itemWaveLogs) {
+      const isP0 = playerWave.player === p0Id.value;
+      for (const waveLog of playerWave.logs) {
+        if (!map.has(waveLog.wave)) map.set(waveLog.wave, {});
+        const entry = map.get(waveLog.wave)!;
+        if (isP0) entry.p0Log = waveLog;
+        else entry.p1Log = waveLog;
+      }
+    }
+    return map;
+  });
+
+  const currentWaveInventory = (pid0: boolean) =>
+    computed(() => {
+      const wave = activeLog.value?.wave ?? 0;
+      // Tìm wave log gần nhất ≤ wave hiện tại
+      let result: ReturnType<typeof snapToEntry>[] = [];
+      for (const [w, entry] of itemWaveMap.value) {
+        if (w <= wave) {
+          const log = pid0 ? entry.p0Log : entry.p1Log;
+          if (log) result = log.inventoryAfter.map((s) => snapToEntry(s)!);
+        }
+      }
+      return result;
+    });
+
+  const p0Inventory = currentWaveInventory(true);
+  const p1Inventory = currentWaveInventory(false);
 
   // Khi không replay: dùng turn cuối; khi replay: dùng turnIdx hiện tại
   const activeTurnIdx = computed(() =>
@@ -81,6 +120,9 @@
     return s ? (SKILL_META[s.code]?.icon ?? "❓") : "…";
   };
 
+  const getItemIcon = (code: string | undefined) =>
+    code ? (ITEM_META[code.replace(/-/g, "_")]?.icon ?? "❓") : undefined;
+
   const normalizedGroups = computed<LogGroup[]>(() => {
     if (!p0.value || !p1.value) return [];
     const map = new Map<number, any[]>();
@@ -89,32 +131,154 @@
       if (!map.has(log.wave)) map.set(log.wave, []);
       const myD = log.players[p0Id.value];
       const oppD = log.players[p1Id.value];
-      const mySkill = getSkill(p0.value, myD?.action ?? -1);
-      const oppSkill = getSkill(p1.value, oppD?.action ?? -1);
-      map.get(log.wave)!.push({
-        wave: log.wave,
-        turn: log.turn,
-        myHp: myD?.stats.hp ?? "?",
-        myDamage: (myD?.damageReceive ?? []).reduce((s: number, e: any) => s + e.value, 0),
-        mySkillIcon: skillIcon(p0.value, myD?.action ?? -1),
-        oppHp: oppD?.stats.hp ?? "?",
-        oppDamage: (oppD?.damageReceive ?? []).reduce((s: number, e: any) => s + e.value, 0),
-        oppSkillIcon: skillIcon(p1.value, oppD?.action ?? -1),
-        counter: mySkill && oppSkill ? (SKILL_COUNTER[`${mySkill.type}_vs_${oppSkill.type}`] ?? null) : null,
-        isActive: isReplayMode.value && i === turnIdx.value,
-      });
+      const myEffects: any[] = myD?.damageReceive ?? [];
+      const oppEffects: any[] = oppD?.damageReceive ?? [];
+
+      if (log.turn === 0) {
+        const myHeal = myEffects
+          .filter((e) => e.typeEffect === "heal")
+          .reduce((s, e) => s + e.value, 0);
+        const oppHeal = oppEffects
+          .filter((e) => e.typeEffect === "heal")
+          .reduce((s, e) => s + e.value, 0);
+        const myItemCode = myD?.itemUsed?.code as string | undefined;
+        const oppItemCode = oppD?.itemUsed?.code as string | undefined;
+        const norm = (c?: string) => c?.replace(/-/g, "_");
+        const myCode = norm(myItemCode);
+        const oppCode = norm(oppItemCode);
+
+        let effectNote: string | undefined;
+        if (myCode === "paradox_001" || oppCode === "paradox_001") {
+          effectNote = myCode === oppCode ? "🔄 Counter bị huỷ" : "🔄 Counter đảo ngược";
+        } else if (myCode === "storm_001" || oppCode === "storm_001") {
+          effectNote = "🌪️ Actions cả hai bị xáo trộn";
+        } else if (myCode === "push_001") {
+          effectNote = "⏩ Actions đối thủ bị dịch chuyển";
+        } else if (oppCode === "push_001") {
+          effectNote = "⏩ Actions bạn bị dịch chuyển";
+        } else if (myCode === "shuffle_001") {
+          effectNote = "🔀 Actions đối thủ bị xáo trộn";
+        } else if (oppCode === "shuffle_001") {
+          effectNote = "🔀 Actions bạn bị xáo trộn";
+        }
+
+        const toIcons = (player: typeof p0.value, actions?: number[]) =>
+          actions?.map((idx) => skillIcon(player, idx)) ?? [];
+        const myAff = myD?.actionsAffected;
+        const oppAff = oppD?.actionsAffected;
+
+        map.get(log.wave)!.push({
+          wave: log.wave,
+          turn: 0,
+          myHp: myD?.stats.hp ?? "?",
+          myDamage: 0,
+          myHeal,
+          mySkillIcon: myItemCode ? (getItemIcon(myItemCode) ?? "—") : "—",
+          oppHp: oppD?.stats.hp ?? "?",
+          oppDamage: 0,
+          oppHeal,
+          oppSkillIcon: oppItemCode ? (getItemIcon(oppItemCode) ?? "—") : "—",
+          counter: null,
+          effectNote,
+          myActionsAffected: myAff
+            ? { before: toIcons(p0.value, myAff.before), after: toIcons(p0.value, myAff.after) }
+            : undefined,
+          oppActionsAffected: oppAff
+            ? { before: toIcons(p1.value, oppAff.before), after: toIcons(p1.value, oppAff.after) }
+            : undefined,
+          isActive: isReplayMode.value && i === turnIdx.value,
+        });
+      } else {
+        const mySkill = getSkill(p0.value, myD?.action ?? -1);
+        const oppSkill = getSkill(p1.value, oppD?.action ?? -1);
+        map.get(log.wave)!.push({
+          wave: log.wave,
+          turn: log.turn,
+          myHp: myD?.stats.hp ?? "?",
+          myDamage: myEffects
+            .filter((e) => e.typeEffect !== "heal")
+            .reduce((s, e) => s + e.value, 0),
+          myHeal: 0,
+          mySkillIcon: skillIcon(p0.value, myD?.action ?? -1),
+          myItemIcon: getItemIcon(myD?.itemUsed?.code),
+          oppHp: oppD?.stats.hp ?? "?",
+          oppDamage: oppEffects
+            .filter((e) => e.typeEffect !== "heal")
+            .reduce((s, e) => s + e.value, 0),
+          oppHeal: 0,
+          oppSkillIcon: skillIcon(p1.value, oppD?.action ?? -1),
+          oppItemIcon: getItemIcon(oppD?.itemUsed?.code),
+          counter:
+            mySkill && oppSkill
+              ? (SKILL_COUNTER[`${mySkill.type}_vs_${oppSkill.type}`] ?? null)
+              : null,
+          isActive: isReplayMode.value && i === turnIdx.value,
+        });
+      }
     }
     return [...map.entries()]
       .sort(([a], [b]) => b - a)
-      .map(([wave, logs]) => ({ wave, logs: [...logs].sort((a, b) => b.turn - a.turn) }));
+      .map(([wave, logs]) => {
+        const waveEntry = itemWaveMap.value.get(wave);
+        const buildItemWaveLog = (
+          p0Log?: PlayerItemWaveLogDetail,
+          p1Log?: PlayerItemWaveLogDetail
+        ) => {
+          if (!p0Log && !p1Log) return undefined;
+          return {
+            myPicked: snapToEntry(p0Log?.pickedItem),
+            myInventory: (p0Log?.inventoryAfter ?? []).map((s) => snapToEntry(s)!),
+            oppPicked: snapToEntry(p1Log?.pickedItem),
+            oppInventory: (p1Log?.inventoryAfter ?? []).map((s) => snapToEntry(s)!),
+          };
+        };
+        return {
+          wave,
+          logs: [...logs].sort((a, b) => b.turn - a.turn),
+          itemWaveLog: buildItemWaveLog(waveEntry?.p0Log, waveEntry?.p1Log),
+        };
+      });
   });
 
   // ─── Arena computeds ─────────────────────────────────────────────────────
   const totalDmg = (effects: any[]) =>
-    (effects ?? []).reduce((s: number, e: any) => s + (e.value ?? 0), 0);
+    (effects ?? [])
+      .filter((e) => e.typeEffect !== "heal")
+      .reduce((s: number, e: any) => s + (e.value ?? 0), 0);
+
+  const totalHeal = (effects: any[]) =>
+    (effects ?? [])
+      .filter((e) => e.typeEffect === "heal")
+      .reduce((s: number, e: any) => s + (e.value ?? 0), 0);
+
+  const isItemTurn = computed(() => activeLog.value?.turn === 0);
 
   const p0Dmg = computed(() => totalDmg(activeLog.value?.players[p0Id.value]?.damageReceive ?? []));
   const p1Dmg = computed(() => totalDmg(activeLog.value?.players[p1Id.value]?.damageReceive ?? []));
+  const p0Heal = computed(() =>
+    totalHeal(activeLog.value?.players[p0Id.value]?.damageReceive ?? [])
+  );
+  const p1Heal = computed(() =>
+    totalHeal(activeLog.value?.players[p1Id.value]?.damageReceive ?? [])
+  );
+
+  const p0ItemUsed = computed(() => {
+    if (activeLog.value?.turn !== 0) return null;
+    const code = activeLog.value?.players[p0Id.value]?.itemUsed?.code as string | undefined;
+    if (!code) return null;
+    const norm = code.replace(/-/g, "_");
+    const meta = ITEM_META[norm];
+    return meta ? { icon: meta.icon, label: meta.label } : { icon: "❓", label: norm };
+  });
+
+  const p1ItemUsed = computed(() => {
+    if (activeLog.value?.turn !== 0) return null;
+    const code = activeLog.value?.players[p1Id.value]?.itemUsed?.code as string | undefined;
+    if (!code) return null;
+    const norm = code.replace(/-/g, "_");
+    const meta = ITEM_META[norm];
+    return meta ? { icon: meta.icon, label: meta.label } : { icon: "❓", label: norm };
+  });
 
   const p0ClashIcon = computed(() => {
     const action = activeLog.value?.players[p0Id.value]?.action ?? -1;
@@ -147,6 +311,11 @@
     if (!s0 || !s1) return null;
     return SKILL_COUNTER[`${s1.type}_vs_${s0.type}`] ?? null;
   });
+
+  const winnerName = computed(
+    () =>
+      detail.value?.players.find((p) => p.player._id === detail.value?.winner)?.player.name ?? null
+  );
 
   const endReasonLabel: Record<string, string> = {
     hp_depleted: "Hết HP",
@@ -209,7 +378,7 @@
 
   onMounted(async () => {
     try {
-      battleLogService.setToken(authStore.userToken);
+      battleLogService.setToken(playerStore.playerToken);
       detail.value = await battleLogService.getById(route.params.id as string);
     } catch {
       toast.error("Không tìm thấy trận đấu");
@@ -238,7 +407,7 @@
       <!-- Result header -->
       <div class="text-center text-xs opacity-40 font-semibold uppercase tracking-widest">
         {{ endReasonLabel[detail.endReason] ?? detail.endReason }} ·
-        <span v-if="detail.winner">{{ detail.winner.name }} thắng</span>
+        <span v-if="winnerName">{{ winnerName }} thắng</span>
         <span v-else>Hòa</span>
       </div>
 
@@ -250,7 +419,7 @@
             <span class="font-bold text-sm truncate leading-tight">{{
               p0?.player.name ?? "..."
             }}</span>
-            <span v-if="detail.winner?._id === p0Id" class="badge badge-xs badge-success shrink-0"
+            <span v-if="detail.winner === p0Id" class="badge badge-xs badge-success shrink-0"
               >Thắng</span
             >
           </div>
@@ -287,7 +456,7 @@
             <span class="font-bold text-sm truncate leading-tight">{{
               p1?.player.name ?? "..."
             }}</span>
-            <span v-if="detail.winner?._id === p1Id" class="badge badge-xs badge-success shrink-0"
+            <span v-if="detail.winner === p1Id" class="badge badge-xs badge-success shrink-0"
               >Thắng</span
             >
           </div>
@@ -330,7 +499,36 @@
             style="height: 40px; align-items: flex-end"
           >
             <Transition name="bubble" mode="out-in">
-              <div v-if="p0Counter?.win" :key="activeTurnIdx" class="flex flex-col items-center">
+              <div
+                v-if="p0ItemUsed"
+                :key="`item-${activeTurnIdx}`"
+                class="flex flex-col items-center"
+              >
+                <div
+                  class="px-4 py-1.5 whitespace-nowrap"
+                  :class="
+                    p0Heal > 0
+                      ? 'bg-success text-success-content'
+                      : 'bg-warning text-warning-content'
+                  "
+                  :style="`transform: skewX(-14deg); box-shadow: 0 3px 12px -2px oklch(var(--${p0Heal > 0 ? 'su' : 'wa'}) / 0.6);`"
+                >
+                  <span
+                    class="block text-[11px] font-black uppercase tracking-widest leading-none"
+                    style="transform: skewX(14deg); text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.25)"
+                    >{{ p0ItemUsed.icon }} {{ p0ItemUsed.label }}!</span
+                  >
+                </div>
+                <div
+                  class="w-2.5 h-2.5 rotate-45 -mt-1.5"
+                  :class="p0Heal > 0 ? 'bg-success' : 'bg-warning'"
+                ></div>
+              </div>
+              <div
+                v-else-if="p0Counter?.win"
+                :key="activeTurnIdx"
+                class="flex flex-col items-center"
+              >
                 <div
                   class="px-4 py-1.5 bg-success text-success-content whitespace-nowrap"
                   style="
@@ -351,9 +549,15 @@
           <div class="relative">
             <span
               v-if="p0Dmg > 0"
-              :key="activeTurnIdx"
+              :key="`dmg-${activeTurnIdx}`"
               class="dmg-float absolute top-1/2 left-1/2 text-error font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
               >-{{ p0Dmg }}</span
+            >
+            <span
+              v-if="p0Heal > 0"
+              :key="`heal-${activeTurnIdx}`"
+              class="heal-float absolute top-1/2 left-1/2 text-success font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
+              >+{{ p0Heal }}</span
             >
             <img :src="slimeGif" class="h-24 w-auto object-contain" />
           </div>
@@ -365,7 +569,9 @@
         <!-- Center clash zone -->
         <div class="flex flex-col items-center justify-center h-full w-full">
           <div :key="activeTurnIdx" class="flex items-center gap-1.5">
-            <span v-if="p0ClashIcon" class="text-2xl w-8 text-center">{{ p0ClashIcon }}</span>
+            <span v-if="!isItemTurn && p0ClashIcon" class="text-2xl w-8 text-center">{{
+              p0ClashIcon
+            }}</span>
             <span v-else class="text-2xl w-8 opacity-0 select-none">·</span>
             <div class="flex items-center justify-center w-12 shrink-0 mx-0.5">
               <div class="relative w-12 h-10 flex items-center justify-center pointer-events-none">
@@ -373,7 +579,9 @@
                 <span class="relative z-10 text-base opacity-20">⚔️</span>
               </div>
             </div>
-            <span v-if="p1ClashIcon" class="text-2xl w-8 text-center">{{ p1ClashIcon }}</span>
+            <span v-if="!isItemTurn && p1ClashIcon" class="text-2xl w-8 text-center">{{
+              p1ClashIcon
+            }}</span>
             <span v-else class="text-2xl w-8 opacity-0 select-none">·</span>
           </div>
         </div>
@@ -385,7 +593,36 @@
             style="height: 40px; align-items: flex-end"
           >
             <Transition name="bubble" mode="out-in">
-              <div v-if="p1Counter?.win" :key="activeTurnIdx" class="flex flex-col items-center">
+              <div
+                v-if="p1ItemUsed"
+                :key="`p1-item-${activeTurnIdx}`"
+                class="flex flex-col items-center"
+              >
+                <div
+                  class="px-4 py-1.5 whitespace-nowrap"
+                  :class="
+                    p1Heal > 0
+                      ? 'bg-success text-success-content'
+                      : 'bg-warning text-warning-content'
+                  "
+                  :style="`transform: skewX(14deg); box-shadow: 0 3px 12px -2px oklch(var(--${p1Heal > 0 ? 'su' : 'wa'}) / 0.6);`"
+                >
+                  <span
+                    class="block text-[11px] font-black uppercase tracking-widest leading-none"
+                    style="transform: skewX(-14deg); text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.25)"
+                    >{{ p1ItemUsed.icon }} {{ p1ItemUsed.label }}!</span
+                  >
+                </div>
+                <div
+                  class="w-2.5 h-2.5 rotate-45 -mt-1.5"
+                  :class="p1Heal > 0 ? 'bg-success' : 'bg-warning'"
+                ></div>
+              </div>
+              <div
+                v-else-if="p1Counter?.win"
+                :key="activeTurnIdx"
+                class="flex flex-col items-center"
+              >
                 <div
                   class="px-4 py-1.5 bg-error text-error-content whitespace-nowrap"
                   style="
@@ -406,15 +643,75 @@
           <div class="relative">
             <span
               v-if="p1Dmg > 0"
-              :key="activeTurnIdx"
+              :key="`p1-dmg-${activeTurnIdx}`"
               class="dmg-float absolute top-1/2 left-1/2 text-error font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
               >-{{ p1Dmg }}</span
+            >
+            <span
+              v-if="p1Heal > 0"
+              :key="`p1-heal-${activeTurnIdx}`"
+              class="heal-float absolute top-1/2 left-1/2 text-success font-extrabold text-base whitespace-nowrap pointer-events-none z-10"
+              >+{{ p1Heal }}</span
             >
             <img :src="slimeGif" class="h-24 w-auto object-contain -scale-x-100" />
           </div>
           <span class="text-[11px] font-bold text-error truncate max-w-[72px]">{{
             p1?.player.name ?? "P2"
           }}</span>
+        </div>
+      </div>
+
+      <!-- Inventory -->
+      <div class="grid grid-cols-2 gap-4 bg-base-100 shadow-md px-3 py-2.5">
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold text-primary opacity-60 uppercase tracking-wide"
+            >Vật phẩm</span
+          >
+          <div class="flex gap-1.5">
+            <div
+              v-for="i in MAX_ITEM_SLOTS"
+              :key="i"
+              class="flex items-center justify-center border text-sm w-9 h-9"
+              :class="
+                p0Inventory[i - 1]
+                  ? 'bg-base-200 border-base-300'
+                  : 'bg-base-300/20 border-dashed border-base-300 opacity-30'
+              "
+            >
+              <span
+                v-if="p0Inventory[i - 1]"
+                class="text-lg leading-none"
+                :title="p0Inventory[i - 1]!.label"
+                >{{ p0Inventory[i - 1]!.icon }}</span
+              >
+              <span v-else class="text-base-content/20 text-xs">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 items-end">
+          <span class="text-[10px] font-semibold text-error opacity-60 uppercase tracking-wide"
+            >Vật phẩm</span
+          >
+          <div class="flex gap-1.5">
+            <div
+              v-for="i in MAX_ITEM_SLOTS"
+              :key="i"
+              class="flex items-center justify-center border text-sm w-9 h-9"
+              :class="
+                p1Inventory[i - 1]
+                  ? 'bg-base-200 border-base-300'
+                  : 'bg-base-300/20 border-dashed border-base-300 opacity-30'
+              "
+            >
+              <span
+                v-if="p1Inventory[i - 1]"
+                class="text-lg leading-none"
+                :title="p1Inventory[i - 1]!.label"
+                >{{ p1Inventory[i - 1]!.icon }}</span
+              >
+              <span v-else class="text-base-content/20 text-xs">—</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -434,7 +731,11 @@
             <button class="btn btn-sm btn-ghost" :disabled="turnIdx === 0" @click="prev">
               ◀ Prev
             </button>
-            <button v-if="autoFinished" class="btn btn-sm btn-primary w-24" @click="replayFromStart">
+            <button
+              v-if="autoFinished"
+              class="btn btn-sm btn-primary w-24"
+              @click="replayFromStart"
+            >
               ↺ Chơi lại
             </button>
             <button v-else class="btn btn-sm btn-primary w-24" @click="toggleAuto">
@@ -468,6 +769,30 @@
 <style scoped>
   .dmg-float {
     animation: dmg-float 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .heal-float {
+    animation: heal-float 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes heal-float {
+    0% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(0px) scale(0.75);
+    }
+    10% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-6px) scale(1.2);
+    }
+    20% {
+      transform: translateX(-50%) translateY(-10px) scale(1);
+    }
+    70% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-48px) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-72px) scale(0.95);
+    }
   }
   @keyframes dmg-float {
     0% {

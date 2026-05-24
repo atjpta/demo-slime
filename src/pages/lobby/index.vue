@@ -97,7 +97,7 @@
       rankingService.setToken(playerStore.playerToken);
       const [player, rankProfile] = await Promise.all([
         playerService.me(),
-        rankingService.getMyRankProfile("normal"),
+        rankingService.getMyRankProfile("unlimit"),
       ]);
       playerStore.myPlayer = player;
       playerStore.myPlayerId = player._id;
@@ -110,7 +110,7 @@
     }
   };
 
-  const joinQueue = async (rankMode?: "normal" | "balance") => {
+  const joinQueue = async (rankMode?: "normal" | "unlimit" | "balance") => {
     authStore.loading = true;
     try {
       router.push("/queue");
@@ -205,7 +205,7 @@
           <button
             class="btn btn-primary btn-sm w-full mt-1"
             :disabled="authStore.loading"
-            @click="joinQueue('normal')"
+            @click="joinQueue('unlimit')"
           >
             ⚔️ Ghép trận
           </button>

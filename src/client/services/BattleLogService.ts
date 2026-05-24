@@ -10,6 +10,8 @@ export type BattleLogTurnPlayer = {
   action: number;
   damageReceive: { typeEffect: string; value: number }[];
   stats: { hp: number; attack: number; magic: number; defense: number };
+  itemUsed?: { code: string; applyTurnIndex?: number };
+  actionsAffected?: { before: number[]; after: number[] };
 };
 
 export type BattleLogTurn = {
@@ -18,17 +20,38 @@ export type BattleLogTurn = {
   players: Record<string, BattleLogTurnPlayer>;
 };
 
+export type RankMode = "normal" | "unlimit" | "balance";
+
+export type BattleItemSnapshot = {
+  code: string;
+  type: string;
+  rule: { phase: string };
+};
+
+export type PlayerItemWaveLogDetail = {
+  wave: number;
+  offeredItems: BattleItemSnapshot[];
+  pickedItem?: BattleItemSnapshot;
+  inventoryAfter: BattleItemSnapshot[];
+};
+
+export type PlayerItemWaveLog = {
+  player: string;
+  logs: PlayerItemWaveLogDetail[];
+};
+
 export type BattleLogItem = {
   _id: string;
   players: BattleLogPlayer[];
-  winner: { _id: string; name: string } | null;
+  winner: string | null;
   endReason: string;
-  rankMode: "normal" | "balance" | null;
+  rankMode: RankMode | null;
   createdAt: string;
 };
 
 export type BattleLogDetail = BattleLogItem & {
   logs: BattleLogTurn[];
+  itemWaveLogs: PlayerItemWaveLog[];
 };
 
 export type BattleLogPagination = {
@@ -39,7 +62,7 @@ export type BattleLogPagination = {
 export class BattleLogService extends BaseClient {
   async getList(params: {
     playerId?: string;
-    rankMode?: "normal" | "balance";
+    rankMode?: RankMode;
     page?: number;
     limit?: number;
   } = {}): Promise<BattleLogPagination> {

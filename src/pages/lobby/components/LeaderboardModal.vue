@@ -17,8 +17,8 @@
     try {
       rankingService.setToken(playerStore.playerToken);
       const [leaderboard, position] = await Promise.all([
-        rankingService.getLeaderboard("normal", 1, 100),
-        rankingService.getMyPosition("normal"),
+        rankingService.getLeaderboard("unlimit", 1, 100),
+        rankingService.getMyPosition("unlimit"),
       ]);
       items.value = leaderboard.items;
       myPosition.value = position;
