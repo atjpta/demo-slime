@@ -5,7 +5,7 @@
   import { usePlayerStore, useBattleStore } from "@/stores";
   import { battleRoom, playerService, battleItemService } from "@/client";
   import type { BattleHandlers, RankUpdateData } from "@/client";
-  import { Phase, TURNS_PER_WAVE, ITEM_META, ITEM_TYPE_META } from "@/constants";
+  import { Phase, TURNS_PER_WAVE, ITEM_META, ITEM_TYPE_META, MAX_ITEM_SLOTS } from "@/constants";
   import PlayerCard from "./components/PlayerCard.vue";
   import SlimeArena from "./components/SlimeArena.vue";
   import ActionPicker from "./components/ActionPicker.vue";
@@ -57,6 +57,81 @@
     }
     battleStore.rooms.battle?.send("submit_actions_battle", payload);
   };
+
+  const autoMode = ref(false);
+  const autoCountdown = ref(0);
+  let autoTimer: ReturnType<typeof setInterval> | null = null;
+
+  const cancelAutoTimer = () => {
+    if (autoTimer) {
+      clearInterval(autoTimer);
+      autoTimer = null;
+    }
+    autoCountdown.value = 0;
+  };
+
+  const scheduleAuto = (callback: () => void) => {
+    cancelAutoTimer();
+    autoCountdown.value = import.meta.env.DEV ? 1 : 3;
+    autoTimer = setInterval(() => {
+      autoCountdown.value--;
+      if (autoCountdown.value <= 0) {
+        cancelAutoTimer();
+        if (autoMode.value) callback();
+      }
+    }, 1000);
+  };
+
+  const doAutoSelectActions = () => {
+    if (battleStore.playerReady[playerStore.myPlayerId]) return;
+    const n = mySkills.value.length;
+    if (n === 0) return;
+    selectedActions.value = Array.from({ length: TURNS_PER_WAVE }, () =>
+      Math.floor(Math.random() * n)
+    );
+    const items = battleStore.playerItems[playerStore.myPlayerId] ?? [];
+    if (items.length > 0) {
+      const slotIdx = Math.floor(Math.random() * items.length);
+      selectedItemSlot.value = slotIdx;
+      const code = items[slotIdx].code.replace(/-/g, "_");
+      selectedItemApplyTurn.value = ITEM_META[code]?.needsTurnPick
+        ? Math.floor(Math.random() * TURNS_PER_WAVE)
+        : null;
+    }
+    submitActions();
+  };
+
+  const doAutoPickItem = () => {
+    if (battleStore.playerReady[playerStore.myPlayerId]) return;
+    const offered = battleStore.offeredItems;
+    if (offered.length === 0) {
+      battleStore.rooms.battle?.send("submit_select_item", {});
+      return;
+    }
+    const itemIndex = Math.floor(Math.random() * offered.length);
+    const myItems = battleStore.playerItems[playerStore.myPlayerId] ?? [];
+    const isFull = myItems.length >= MAX_ITEM_SLOTS;
+    if (isFull) {
+      submitSelectItem(itemIndex, Math.floor(Math.random() * myItems.length));
+    } else {
+      submitSelectItem(itemIndex);
+    }
+  };
+
+  watch(
+    () => battleStore.phase,
+    (phase) => {
+      cancelAutoTimer();
+      if (!autoMode.value) return;
+      if (phase === Phase.SELECTING) {
+        scheduleAuto(doAutoSelectActions);
+      } else if (phase === Phase.SELECTING_ITEM) {
+        scheduleAuto(doAutoPickItem);
+      } else if (phase === Phase.ENDED) {
+        autoMode.value = false;
+      }
+    }
+  );
 
   const submitSelectItem = (itemIndex: number, swapIndex?: number) => {
     battleStore.rooms.battle?.send("submit_select_item", { itemIndex, swapIndex });
@@ -326,6 +401,7 @@
 
   onUnmounted(() => {
     if (revealTimer) clearInterval(revealTimer);
+    cancelAutoTimer();
     if (!battleStore.isReconnecting) battleStore.reset();
   });
 </script>
@@ -406,6 +482,19 @@
             >
               ?
             </button>
+            <button
+              class="btn btn-xs font-bold"
+              :class="autoMode ? 'btn-warning' : 'btn-ghost border border-warning/50 text-warning'"
+              @click="
+                autoMode = !autoMode;
+                if (autoMode) scheduleAuto(doAutoSelectActions);
+                else cancelAutoTimer();
+              "
+            >
+              <template v-if="autoCountdown > 0">Hủy ({{ autoCountdown }}s)</template>
+              <template v-else-if="autoMode">Auto: BẬT</template>
+              <template v-else>Auto</template>
+            </button>
           </div>
           <span class="badge badge-neutral font-bold mx-auto">Wave {{ battleStore.wave }}</span>
           <div class="flex items-baseline gap-1 justify-end">
@@ -454,8 +543,13 @@
   <SelectItemModal
     v-if="battleStore.phase === Phase.SELECTING_ITEM"
     :submitted="!!battleStore.playerReady[playerStore.myPlayerId]"
+    :auto-countdown="autoCountdown"
     @submit="submitSelectItem"
     @skip="battleStore.rooms.battle?.send('submit_select_item', {})"
+    @cancel-auto="
+      cancelAutoTimer();
+      autoMode = false;
+    "
   />
 
   <!-- Item detail modal -->

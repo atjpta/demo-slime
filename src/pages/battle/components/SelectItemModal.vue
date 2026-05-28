@@ -5,11 +5,13 @@
 
   const props = defineProps<{
     submitted: boolean;
+    autoCountdown?: number;
   }>();
 
   const emit = defineEmits<{
     submit: [itemIndex: number, swapIndex?: number];
     skip: [];
+    cancelAuto: [];
   }>();
 
   const playerStore = usePlayerStore();
@@ -42,6 +44,17 @@
   };
 
   const canPick = computed(() => !isFull.value || pendingSwapIndex.value !== null);
+
+  const autoPickItem = () => {
+    if (props.submitted || battleStore.offeredItems.length === 0) return;
+    const itemIndex = Math.floor(Math.random() * battleStore.offeredItems.length);
+    if (isFull.value) {
+      const swapIdx = Math.floor(Math.random() * myItems.value.length);
+      emit("submit", itemIndex, swapIdx);
+    } else {
+      emit("submit", itemIndex);
+    }
+  };
 </script>
 
 <template>
@@ -52,6 +65,21 @@
         <div class="flex items-center gap-2">
           <h3 class="font-bold text-lg">Nhận Vật Phẩm</h3>
           <span class="badge badge-neutral font-bold">Wave {{ battleStore.wave }}</span>
+          <button
+            v-if="autoCountdown && autoCountdown > 0"
+            class="btn btn-xs btn-warning font-bold animate-pulse"
+            @click="emit('cancelAuto')"
+          >
+            Hủy ({{ autoCountdown }}s)
+          </button>
+          <button
+            v-else
+            class="btn btn-xs btn-warning font-bold"
+            :disabled="submitted || battleStore.offeredItems.length === 0"
+            @click="autoPickItem"
+          >
+            Auto
+          </button>
         </div>
         <div class="flex items-baseline gap-1">
           <span
